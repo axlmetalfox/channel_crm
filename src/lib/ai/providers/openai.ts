@@ -1,5 +1,5 @@
 import { AiError, type ProviderResult } from '../types'
-import { MAX_OUTPUT_TOKENS } from '../defaults'
+import { MAX_OUTPUT_TOKENS, openAiBaseUrl } from '../defaults'
 import {
   mergeConsecutive,
   normalizeUsage,
@@ -7,8 +7,6 @@ import {
   toNetworkError,
   type ProviderArgs,
 } from './shared'
-
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 interface OpenAiResponse {
   choices?: { message?: { content?: string } }[]
@@ -20,16 +18,20 @@ interface OpenAiResponse {
 }
 
 /**
- * Call OpenAI's Chat Completions endpoint with the caller's own key.
- * Returns the raw assistant text + token usage (handoff parsing happens
- * in `generateReply`).
+ * Call an OpenAI-compatible Chat Completions endpoint with the caller's
+ * own key. The root URL is OpenAI's unless `AI_OPENAI_BASE_URL` points
+ * it at a gateway. Returns the raw assistant text + token usage
+ * (handoff parsing happens in `generateReply`).
  */
 export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs } = args
+  // Resolved before the try block: a misconfigured URL must surface as
+  // its own AiError, not be rewrapped as a network failure.
+  const url = `${openAiBaseUrl()}/chat/completions`
 
   let res: Response
   try {
-    res = await fetch(OPENAI_URL, {
+    res = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

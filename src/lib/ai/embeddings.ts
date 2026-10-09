@@ -1,5 +1,5 @@
 import { AiError } from './types'
-import { aiRequestTimeoutMs } from './defaults'
+import { aiRequestTimeoutMs, openAiBaseUrl } from './defaults'
 import { providerHttpError, toNetworkError } from './providers/shared'
 
 // ============================================================
@@ -7,13 +7,12 @@ import { providerHttpError, toNetworkError } from './providers/shared'
 //
 // Used for the knowledge base's optional semantic-search path: embed
 // each chunk at ingest, and embed the query at retrieval. Anthropic has
-// no embeddings endpoint, so this is always OpenAI's — the account
+// no embeddings endpoint, so this is always the OpenAI-compatible API
+// (OpenAI's, or the gateway named by `AI_OPENAI_BASE_URL`) — the account
 // supplies a (possibly separate) embeddings key. 1536-dim
 // text-embedding-3-small matches the `vector(1536)` column in
 // migration 030.
 // ============================================================
-
-const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
 
 export const EMBEDDING_MODEL = 'text-embedding-3-small'
 export const EMBEDDING_DIMENSIONS = 1536
@@ -44,6 +43,9 @@ export async function embedTexts(
 ): Promise<number[][]> {
   if (inputs.length === 0) return []
   const timeoutMs = aiRequestTimeoutMs()
+  // Same root as chat (`AI_OPENAI_BASE_URL`); the gateway must serve
+  // `text-embedding-3-small` at 1536 dimensions to match migration 030.
+  const url = `${openAiBaseUrl()}/embeddings`
   const out: number[][] = []
 
   for (let start = 0; start < inputs.length; start += BATCH_SIZE) {
@@ -51,7 +53,7 @@ export async function embedTexts(
 
     let res: Response
     try {
-      res = await fetch(OPENAI_EMBEDDINGS_URL, {
+      res = await fetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,

@@ -1,4 +1,4 @@
-import type { AiProvider } from './types'
+import { AiError, type AiProvider } from './types'
 
 // ============================================================
 // Tunables + prompt scaffold for the AI reply assistant.
@@ -28,6 +28,55 @@ export const MAX_OUTPUT_TOKENS = 1024
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 20
+
+/** OpenAI's own API root, used when `AI_OPENAI_BASE_URL` is unset. */
+export const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+
+/**
+ * Root URL (no trailing slash) of the OpenAI-compatible API used by the
+ * `openai` provider — chat completions and embeddings both hang off it.
+ *
+ * Set `AI_OPENAI_BASE_URL` to point the provider at any OpenAI-compatible
+ * gateway (e.g. `https://router.hostinger.com/v1`). It is a server-wide,
+ * operator-controlled setting on purpose, not an account field: an
+ * account-supplied URL would let any admin make the server call an
+ * arbitrary host (SSRF) and receive the key they typed back out.
+ *
+ * Read on every call, not at module load, so it follows the runtime
+ * environment rather than whatever was present at build time.
+ *
+ * Fails closed: a malformed or non-https value throws instead of falling
+ * back to api.openai.com, which would send a gateway key to the wrong
+ * provider. Plain http is accepted only for localhost (local dev/tests).
+ */
+export function openAiBaseUrl(): string {
+  const raw = process.env.AI_OPENAI_BASE_URL?.trim()
+  if (!raw) return OPENAI_DEFAULT_BASE_URL
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw misconfiguredBaseUrl('it is not a valid URL')
+  }
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocal)) {
+    throw misconfiguredBaseUrl('it must use https')
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw misconfiguredBaseUrl(
+      'it must not contain credentials, a query string or a fragment',
+    )
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+}
+
+function misconfiguredBaseUrl(reason: string): AiError {
+  return new AiError(`AI_OPENAI_BASE_URL is invalid: ${reason}.`, {
+    code: 'misconfigured',
+    status: 500,
+  })
+}
 
 /** Per-call provider timeout. Override with `AI_REQUEST_TIMEOUT_MS`. */
 export function aiRequestTimeoutMs(): number {
