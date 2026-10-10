@@ -39,16 +39,28 @@ interface EndpointRow {
   secret: string;
 }
 
+/** How a delivery round went: endpoints subscribed vs. accepted. */
+export interface DeliveryResult {
+  endpoints: number;
+  delivered: number;
+}
+
 /**
  * Deliver `event` (+ `data`) to every active endpoint of `accountId`
- * subscribed to it. Never throws.
+ * subscribed to it and report how many accepted it. Never throws.
+ *
+ * `eventId` overrides the envelope `id`. Pass a stable id when the
+ * caller may re-send the same logical event (for example a retried lead
+ * intake) so the receiver can dedupe on it; by default every call gets
+ * a fresh uuid.
  */
-export async function dispatchWebhookEvent(
+export async function deliverWebhookEvent(
   db: SupabaseClient,
   accountId: string,
   event: WebhookEvent,
-  data: unknown
-): Promise<void> {
+  data: unknown,
+  opts: { eventId?: string } = {}
+): Promise<DeliveryResult> {
   try {
     const { data: rows, error } = await db
       .from('webhook_endpoints')
@@ -57,14 +69,16 @@ export async function dispatchWebhookEvent(
       .eq('is_active', true)
       .contains('events', [event]);
 
-    if (error || !rows || rows.length === 0) return;
+    if (error || !rows || rows.length === 0) {
+      return { endpoints: 0, delivered: 0 };
+    }
 
     // Sign the exact bytes we send so a receiver can recompute the
     // HMAC over the raw request body. `id` is a per-delivery uuid the
     // receiver can dedupe on (deliveries are at-least-once and may
     // repeat / arrive out of order).
     const payload = JSON.stringify({
-      id: randomUUID(),
+      id: opts.eventId ?? randomUUID(),
       event,
       occurred_at: new Date().toISOString(),
       account_id: accountId,
@@ -72,15 +86,34 @@ export async function dispatchWebhookEvent(
     });
     const tsSeconds = Math.floor(Date.now() / 1000);
 
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       (rows as EndpointRow[]).map((row) =>
         deliverOne(db, row, event, payload, tsSeconds)
       )
     );
+    return {
+      endpoints: rows.length,
+      delivered: results.filter((r) => r.status === 'fulfilled' && r.value)
+        .length,
+    };
   } catch (err) {
     // Never let a delivery problem bubble into the webhook response.
     console.error('[webhooks] dispatch failed:', err);
+    return { endpoints: 0, delivered: 0 };
   }
+}
+
+/**
+ * Fire-and-forget form of `deliverWebhookEvent`: same delivery, result
+ * discarded. Never throws.
+ */
+export async function dispatchWebhookEvent(
+  db: SupabaseClient,
+  accountId: string,
+  event: WebhookEvent,
+  data: unknown
+): Promise<void> {
+  await deliverWebhookEvent(db, accountId, event, data);
 }
 
 async function deliverOne(
@@ -89,14 +122,14 @@ async function deliverOne(
   event: WebhookEvent,
   payload: string,
   tsSeconds: number
-): Promise<void> {
+): Promise<boolean> {
   // SSRF guard: refuse to POST to a host that resolves to a private /
   // loopback / link-local address. Counts as a failure so a
   // misconfigured internal URL surfaces and eventually auto-disables.
   if (!(await isDeliverableUrl(row.url))) {
     console.warn('[webhooks] refusing non-public delivery target for', row.id);
     await recordFailure(db, row);
-    return;
+    return false;
   }
 
   let secret: string;
@@ -107,7 +140,7 @@ async function deliverOne(
     // signature — count it as a failure so it eventually auto-disables.
     console.error('[webhooks] secret decrypt failed for', row.id, err);
     await recordFailure(db, row);
-    return;
+    return false;
   }
 
   try {
@@ -133,12 +166,14 @@ async function deliverOne(
       .from('webhook_endpoints')
       .update({ failure_count: 0, last_delivery_at: new Date().toISOString() })
       .eq('id', row.id);
+    return true;
   } catch (err) {
     console.warn(
       `[webhooks] delivery to ${row.id} failed:`,
       err instanceof Error ? err.message : err
     );
     await recordFailure(db, row);
+    return false;
   }
 }
 

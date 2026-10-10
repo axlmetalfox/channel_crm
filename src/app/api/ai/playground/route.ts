@@ -4,12 +4,10 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { loadAiConfig } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
 import { generateReply } from '@/lib/ai/generate'
-import { buildSystemPrompt } from '@/lib/ai/defaults'
+import { aiContextMessageLimit, buildSystemPrompt } from '@/lib/ai/defaults'
+import { parseLeadCompletion } from '@/lib/leads/sentinel'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError, type ChatMessage } from '@/lib/ai/types'
-
-// Keep the tested transcript bounded, mirroring the live context window.
-const MAX_TURNS = 20
 
 /**
  * POST /api/ai/playground  (agent+)
@@ -44,7 +42,9 @@ export async function POST(request: Request) {
           typeof (m as ChatMessage).content === 'string' &&
           (m as ChatMessage).content.trim().length > 0,
       )
-      .slice(-MAX_TURNS)
+      // Bounded like the live context window, so a test sees what a
+      // real conversation would.
+      .slice(-aiContextMessageLimit())
 
     if (messages.length === 0) {
       return NextResponse.json(
@@ -83,15 +83,22 @@ export async function POST(request: Request) {
       mode: 'auto_reply',
       knowledge,
       handoffEnabled: config.handoffEnabled,
+      leadCapture: config.leadCaptureEnabled,
     })
 
-    const { text, handoff } = await generateReply({ config, systemPrompt, messages })
+    const generated = await generateReply({ config, systemPrompt, messages })
+    const { handoff } = generated
+    // Same as the live bot: the completion marker never reaches the
+    // customer. The Playground reports it instead of capturing a lead,
+    // so testing never writes to a CRM.
+    const { text, complete } = parseLeadCompletion(generated.text)
     // With handoff off the live bot never hands off, so the Playground
     // must not show a handoff either. An empty reply stays empty here:
     // that is exactly what the live bot would (not) send.
     return NextResponse.json({
       reply: text,
       handoff: config.handoffEnabled ? handoff : false,
+      lead_complete: config.leadCaptureEnabled && complete,
     })
   } catch (err) {
     if (err instanceof AiError) {

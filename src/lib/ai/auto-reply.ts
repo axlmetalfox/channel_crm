@@ -7,6 +7,8 @@ import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
+import { parseLeadCompletion } from '@/lib/leads/sentinel'
+import { captureLead } from '@/lib/leads/capture'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
@@ -111,13 +113,19 @@ export async function dispatchInboundToAiReply(
       mode: 'auto_reply',
       knowledge,
       handoffEnabled: config.handoffEnabled,
+      leadCapture: config.leadCaptureEnabled,
     })
 
-    const { text, handoff, usage } = await generateReply({
+    const generated = await generateReply({
       config,
       systemPrompt,
       messages,
     })
+    const { handoff, usage } = generated
+    // The completion marker is for us, never for the customer: strip it
+    // from every reply, and only act on it when lead capture is on.
+    const { text, complete } = parseLeadCompletion(generated.text)
+    const interviewDone = complete && config.leadCaptureEnabled
 
     // Record token spend on the account's BYO key. Fire-and-forget so it
     // never adds latency to the customer-facing send: `logAiUsage`
@@ -192,7 +200,7 @@ export async function dispatchInboundToAiReply(
     }
     if (claimed !== true) return // lost the per-conversation cap race
 
-    await engineSendText({
+    const sent = await engineSendText({
       accountId,
       userId: configOwnerUserId,
       conversationId,
@@ -200,6 +208,19 @@ export async function dispatchInboundToAiReply(
       text,
       aiGenerated: true,
     })
+
+    // The closing message reached the customer: hand the interview to the
+    // lead pipeline. It records its own outcome and never throws.
+    if (interviewDone) {
+      await captureLead({
+        db,
+        config,
+        accountId,
+        conversationId,
+        contactId,
+        triggerMessageId: sent.whatsapp_message_id,
+      })
+    }
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }

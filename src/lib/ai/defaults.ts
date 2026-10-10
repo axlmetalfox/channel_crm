@@ -1,4 +1,5 @@
 import { AiError, type AiProvider } from './types'
+import { LEAD_COMPLETE_SENTINEL } from '@/lib/leads/sentinel'
 
 // ============================================================
 // Tunables + prompt scaffold for the AI reply assistant.
@@ -106,6 +107,9 @@ export function buildSystemPrompt(args: {
   /** Auto-reply only. When false the model is not taught the handoff
    *  phrase and is told no human will follow up. Defaults to true. */
   handoffEnabled?: boolean
+  /** Auto-reply only. When true the model is taught to mark the closing
+   *  message of an interview with LEAD_COMPLETE_SENTINEL. */
+  leadCapture?: boolean
 }): string {
   const { userPrompt, mode, knowledge } = args
   const handoffEnabled = args.handoffEnabled !== false
@@ -126,6 +130,12 @@ export function buildSystemPrompt(args: {
   } else if (mode === 'auto_reply') {
     parts.push(
       `You are replying automatically and this conversation is never handed to a human, so never output the control phrase ${HANDOFF_SENTINEL} or any other control phrase. Always write a normal reply to the customer. When you do not have the information, do not guess: follow the business instructions below for what to say in that case, and keep helping within your role.`,
+    )
+  }
+
+  if (mode === 'auto_reply' && args.leadCapture) {
+    parts.push(
+      `This conversation is an interview that collects a customer's details for the business. When you send the final closing message — the one that tells the customer their request has been registered and says goodbye — append ${LEAD_COMPLETE_SENTINEL} at the very end of that message. Do this once, only on that closing message, and never before the business instructions say the interview is complete.`,
     )
   }
 

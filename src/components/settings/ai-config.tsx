@@ -75,6 +75,7 @@ export function AiConfig() {
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
   const [handoffEnabled, setHandoffEnabled] = useState(true);
+  const [leadCaptureEnabled, setLeadCaptureEnabled] = useState(false);
   const [members, setMembers] = useState<AccountMember[]>([]);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
@@ -102,6 +103,7 @@ export function AiConfig() {
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHandoffEnabled(data.handoff_enabled !== false);
+        setLeadCaptureEnabled(data.lead_capture_enabled === true);
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -154,6 +156,7 @@ export function AiConfig() {
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
     handoff_enabled: handoffEnabled,
+    lead_capture_enabled: leadCaptureEnabled,
   });
 
   const handleTest = async () => {
@@ -472,6 +475,22 @@ export function AiConfig() {
                 checked={handoffEnabled}
                 onCheckedChange={setHandoffEnabled}
                 disabled={disabled}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('leadCapture')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('leadCaptureDesc')}
+                </p>
+              </div>
+              <Switch
+                checked={leadCaptureEnabled}
+                onCheckedChange={setLeadCaptureEnabled}
+                disabled={disabled || provider !== 'openai'}
               />
             </div>
 

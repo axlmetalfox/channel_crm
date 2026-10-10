@@ -12,11 +12,12 @@ interface AiConfigRow {
   auto_reply_max_per_conversation: number
   handoff_agent_id: string | null
   handoff_enabled: boolean
+  lead_capture_enabled: boolean
   embeddings_api_key: string | null
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, embeddings_api_key'
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, embeddings_api_key'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -82,6 +83,7 @@ export async function loadAiConfig(
     // Only an explicit `false` turns handoff off; a missing value (older
     // row shape) keeps the original behaviour.
     handoffEnabled: row.handoff_enabled !== false,
+    leadCaptureEnabled: row.lead_capture_enabled === true,
     embeddingsApiKey,
   }
 }

@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -119,6 +119,13 @@ export async function POST(request: Request) {
     const handoffEnabledProvided = typeof body.handoff_enabled === 'boolean'
     const handoffEnabled = body.handoff_enabled !== false
 
+    // Lead capture on/off. Absent → left unchanged (and false on insert).
+    const leadCaptureProvided = typeof body.lead_capture_enabled === 'boolean'
+    const leadCaptureEnabled = body.lead_capture_enabled === true
+    if (leadCaptureEnabled && provider !== 'openai') {
+      return bad('Lead capture needs the OpenAI-compatible provider.')
+    }
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
     // Embeddings key (optional, for semantic KB search): a non-empty
@@ -172,6 +179,7 @@ export async function POST(request: Request) {
           autoReplyMaxPerConversation: maxPer,
           handoffAgentId: null,
           handoffEnabled,
+          leadCaptureEnabled,
           embeddingsApiKey: null,
         })
       } catch (err) {
@@ -216,6 +224,7 @@ export async function POST(request: Request) {
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.
     if (handoffProvided) shared.handoff_agent_id = handoffAgentId
     if (handoffEnabledProvided) shared.handoff_enabled = handoffEnabled
+    if (leadCaptureProvided) shared.lead_capture_enabled = leadCaptureEnabled
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
     } else if (clearEmbeddingsKey) {

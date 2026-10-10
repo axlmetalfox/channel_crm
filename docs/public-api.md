@@ -294,6 +294,7 @@ things happen in your account. **Migration required:** apply
 | `message.received`       | An inbound message arrives from a contact         |
 | `message.status_updated` | A message you sent changed delivery status        |
 | `conversation.created`   | A new conversation is opened for a contact        |
+| `lead.captured`          | A lead-capture AI agent finished an interview     |
 
 ### Managing endpoints
 
@@ -337,6 +338,18 @@ delivery uuid you can dedupe on, and `data` varies by `event`:
 { "conversation_id": "…", "contact_id": "…" }
 // message.status_updated
 { "whatsapp_message_id": "wamid.…", "conversation_id": "…", "status": "delivered" }
+// lead.captured  (envelope `id` is the stable intake id: dedupe on it, it repeats on retries)
+{
+  "intake_id": "…", "conversation_id": "…", "contact_id": "…", "channel_phone": "573112580000",
+  "lead": {
+    "first_name": "Juan Carlos", "last_name": "Pérez Gómez", "email": "juan@example.com",
+    "company": "Lácteos del Valle", "whatsapp_number": "+573112580000", "contact_phone": "+573102556678",
+    "country": "Colombia", "city": "Medellín", "request_summary": "…",
+    "request_type": "maquina_nueva" // | info_maquina | alquiler | repuestos | servicio_tecnico
+  },
+  "consent": { "given": true, "captured_at": "2026-10-10T12:00:00.000Z" },
+  "transcript": [{ "role": "assistant", "text": "…" }, { "role": "customer", "text": "…" }]
+}
 ```
 
 Headers: `X-Wacrm-Event`, `X-Wacrm-Webhook-Id`, and `X-Wacrm-Signature`.

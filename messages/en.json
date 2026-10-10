@@ -1701,6 +1701,8 @@
       "maxAutoRepliesDesc": "After this many bot replies in one thread, the bot goes quiet.",
       "allowHandoff": "Allow hand-off to a human",
       "allowHandoffDesc": "On: when the bot can’t help it pauses and passes the chat to a person. Off: it never hands off and keeps replying within your instructions — use it for capture-only agents with nobody watching the inbox.",
+      "leadCapture": "Lead capture",
+      "leadCaptureDesc": "When on, the agent ends an interview with a hidden marker; wacrm then extracts the lead (name, contact, request) and sends it to your CRM through a lead.captured webhook. Needs the OpenAI-compatible provider and a webhook endpoint subscribed to lead.captured.",
       "handoffTo": "Hand off to",
       "handoffToDesc": "When the bot can’t help — or hits the reply cap — it pauses and routes the chat here, with a short note on what happened.",
       "handoffQueue": "Unassigned queue (any agent can pick it up)",

@@ -11,7 +11,11 @@ vi.mock('@/lib/webhooks/ssrf', () => ({
   isDeliverableUrl: vi.fn(async () => true),
 }));
 
-import { dispatchWebhookEvent, MAX_CONSECUTIVE_FAILURES } from './deliver';
+import {
+  deliverWebhookEvent,
+  dispatchWebhookEvent,
+  MAX_CONSECUTIVE_FAILURES,
+} from './deliver';
 import { isDeliverableUrl } from './ssrf';
 
 interface Row {
@@ -131,5 +135,54 @@ describe('dispatchWebhookEvent', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(calls.rpcs).toHaveLength(0);
     expect(calls.updates).toHaveLength(0);
+  });
+});
+
+describe('deliverWebhookEvent', () => {
+  const rows: Row[] = [
+    { id: 'a', url: 'https://a.test/hook', secret: 's1' },
+    { id: 'b', url: 'https://b.test/hook', secret: 's2' },
+  ];
+
+  it('reports how many endpoints accepted the event', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 500 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await deliverWebhookEvent(
+      makeDb(rows, emptyCalls()),
+      'acct-1',
+      'lead.captured',
+      { x: 1 }
+    );
+    expect(result).toEqual({ endpoints: 2, delivered: 1 });
+  });
+
+  it('uses the caller-supplied event id as the envelope id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deliverWebhookEvent(
+      makeDb(rows.slice(0, 1), emptyCalls()),
+      'acct-1',
+      'lead.captured',
+      { x: 1 },
+      { eventId: 'intake-123' }
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.id).toBe('intake-123');
+    expect(body.event).toBe('lead.captured');
+  });
+
+  it('reports zero endpoints when nobody is subscribed', async () => {
+    const result = await deliverWebhookEvent(
+      makeDb([], emptyCalls()),
+      'acct-1',
+      'lead.captured',
+      {}
+    );
+    expect(result).toEqual({ endpoints: 0, delivered: 0 });
   });
 });

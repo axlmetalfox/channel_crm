@@ -29,6 +29,10 @@ export interface AiConfig {
    *  told it can: it keeps replying within the business instructions.
    *  Meant for capture-only agents with no human in the loop. */
   handoffEnabled: boolean
+  /** When true the bot ends an interview with a completion marker and
+   *  wacrm then extracts the lead and sends it to the account's CRM via
+   *  the `lead.captured` webhook. Needs the OpenAI-compatible provider. */
+  leadCaptureEnabled: boolean
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */

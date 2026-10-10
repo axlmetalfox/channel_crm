@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   retrieveKnowledge: vi.fn(),
   generateReply: vi.fn(),
   engineSendText: vi.fn(),
+  captureLead: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -22,6 +23,7 @@ vi.mock('./context', () => ({ buildConversationContext: h.buildConversationConte
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
+vi.mock('@/lib/leads/capture', () => ({ captureLead: h.captureLead }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
@@ -77,6 +79,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
     handoffEnabled: true,
+    leadCaptureEnabled: false,
     embeddingsApiKey: null,
     ...overrides,
   }
@@ -250,5 +253,65 @@ describe('dispatchInboundToAiReply — handoff disabled', () => {
       expect.objectContaining({ text: 'Claro, te ayudo' }),
     )
     expect(h.state.updatePayload).toBeNull()
+  })
+})
+
+describe('dispatchInboundToAiReply — lead capture', () => {
+  const CLOSING = 'Tu solicitud ha quedado registrada. [[LEAD_COMPLETE]]'
+
+  it('strips the marker and hands the finished interview to the lead pipeline', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
+    h.generateReply.mockResolvedValue({ text: CLOSING, handoff: false })
+    await dispatchInboundToAiReply(ARGS)
+
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Tu solicitud ha quedado registrada.' }),
+    )
+    expect(h.captureLead).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acct-1',
+        conversationId: 'conv-1',
+        contactId: 'contact-1',
+        triggerMessageId: 'm1',
+      }),
+    )
+  })
+
+  it('teaches the model the marker only when lead capture is on', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply.mock.calls[0][0].systemPrompt).toContain('[[LEAD_COMPLETE]]')
+
+    h.generateReply.mockClear()
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: false }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply.mock.calls[0][0].systemPrompt).not.toContain(
+      '[[LEAD_COMPLETE]]',
+    )
+  })
+
+  it('never leaks the marker to the customer, even with lead capture off', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: false }))
+    h.generateReply.mockResolvedValue({ text: CLOSING, handoff: false })
+    await dispatchInboundToAiReply(ARGS)
+
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Tu solicitud ha quedado registrada.' }),
+    )
+    expect(h.captureLead).not.toHaveBeenCalled()
+  })
+
+  it('does not capture a lead for an ordinary reply', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.captureLead).not.toHaveBeenCalled()
+  })
+
+  it('does not capture when the closing message never went out', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
+    h.generateReply.mockResolvedValue({ text: CLOSING, handoff: false })
+    h.state.claim = false
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.captureLead).not.toHaveBeenCalled()
   })
 })
