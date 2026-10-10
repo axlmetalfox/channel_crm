@@ -471,7 +471,7 @@ export function AiConfig() {
               <Switch
                 checked={handoffEnabled}
                 onCheckedChange={setHandoffEnabled}
-                disabled={disabled || !autoReplyEnabled}
+                disabled={disabled}
               />
             </div>
 
@@ -485,7 +485,7 @@ export function AiConfig() {
                 onValueChange={(v) =>
                   setHandoffAgentId(!v || v === HANDOFF_QUEUE ? '' : v)
                 }
-                disabled={disabled || !autoReplyEnabled || !handoffEnabled}
+                disabled={disabled || !handoffEnabled}
               >
                 <SelectTrigger id="ai-handoff">
                   <SelectValue />
