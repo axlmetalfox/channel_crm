@@ -76,6 +76,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyEnabled: true,
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
+    handoffEnabled: true,
     embeddingsApiKey: null,
     ...overrides,
   }
@@ -208,5 +209,46 @@ describe('dispatchInboundToAiReply — handoff', () => {
       ai_autoreply_disabled: true,
       assigned_agent_id: 'agent-7',
     })
+  })
+})
+
+describe('dispatchInboundToAiReply — handoff disabled', () => {
+  beforeEach(() => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ handoffEnabled: false }))
+  })
+
+  it('tells the prompt builder handoff is off and sends a normal reply', async () => {
+    h.generateReply.mockResolvedValue({
+      text: 'Esa información te la suministrará nuestro asesor.',
+      handoff: false,
+    })
+    await dispatchInboundToAiReply(ARGS)
+    const systemPrompt = h.generateReply.mock.calls[0][0].systemPrompt as string
+    expect(systemPrompt).not.toContain('reply with exactly [[HANDOFF]]')
+    expect(systemPrompt).toContain('never handed to a human')
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Esa información te la suministrará nuestro asesor.',
+      }),
+    )
+    expect(h.state.updatePayload).toBeNull()
+  })
+
+  it('does not pause or reassign the thread when the model emits the handoff phrase anyway', async () => {
+    h.generateReply.mockResolvedValue({ text: '', handoff: true })
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    // No ai_autoreply_disabled / assignment / summary written, no slot spent.
+    expect(h.state.updatePayload).toBeNull()
+    expect(h.state.rpcCalls).toHaveLength(0)
+  })
+
+  it('still sends the text when the phrase trails a real reply', async () => {
+    h.generateReply.mockResolvedValue({ text: 'Claro, te ayudo', handoff: true })
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Claro, te ayudo' }),
+    )
+    expect(h.state.updatePayload).toBeNull()
   })
 })

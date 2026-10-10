@@ -110,6 +110,7 @@ export async function dispatchInboundToAiReply(
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      handoffEnabled: config.handoffEnabled,
     })
 
     const { text, handoff, usage } = await generateReply({
@@ -132,7 +133,7 @@ export async function dispatchInboundToAiReply(
       usage,
     })
 
-    if (handoff || !text) {
+    if (config.handoffEnabled && (handoff || !text)) {
       // The model can't (or shouldn't) answer — stop auto-replying on
       // this thread and hand it to a human. We (a) pause the bot here
       // (sticky until re-enabled), (b) route the conversation to the
@@ -154,6 +155,18 @@ export async function dispatchInboundToAiReply(
         update.assigned_agent_id = config.handoffAgentId
       }
       await db.from('conversations').update(update).eq('id', conversationId)
+      return
+    }
+
+    // Handoff is off for this account: never pause the thread or route it
+    // to a person. If the model still produced nothing to say (it emitted
+    // only the control phrase, or came back empty), there is nothing to
+    // send — leave the conversation untouched and let the next inbound
+    // message try again.
+    if (!text) {
+      console.warn(
+        `[ai auto-reply] handoff is disabled for account ${accountId} and the model returned no reply text; nothing sent.`,
+      )
       return
     }
 

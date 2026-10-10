@@ -82,10 +82,17 @@ export async function POST(request: Request) {
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      handoffEnabled: config.handoffEnabled,
     })
 
     const { text, handoff } = await generateReply({ config, systemPrompt, messages })
-    return NextResponse.json({ reply: text, handoff })
+    // With handoff off the live bot never hands off, so the Playground
+    // must not show a handoff either. An empty reply stays empty here:
+    // that is exactly what the live bot would (not) send.
+    return NextResponse.json({
+      reply: text,
+      handoff: config.handoffEnabled ? handoff : false,
+    })
   } catch (err) {
     if (err instanceof AiError) {
       return NextResponse.json(

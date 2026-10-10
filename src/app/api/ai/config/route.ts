@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -114,6 +114,11 @@ export async function POST(request: Request) {
       handoffAgentId = rawHandoff
     }
 
+    // Handoff on/off. Absent → left unchanged on update (and true on the
+    // first insert); only an explicit boolean changes it.
+    const handoffEnabledProvided = typeof body.handoff_enabled === 'boolean'
+    const handoffEnabled = body.handoff_enabled !== false
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
     // Embeddings key (optional, for semantic KB search): a non-empty
@@ -166,6 +171,7 @@ export async function POST(request: Request) {
           autoReplyEnabled,
           autoReplyMaxPerConversation: maxPer,
           handoffAgentId: null,
+          handoffEnabled,
           embeddingsApiKey: null,
         })
       } catch (err) {
@@ -209,6 +215,7 @@ export async function POST(request: Request) {
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.
     if (handoffProvided) shared.handoff_agent_id = handoffAgentId
+    if (handoffEnabledProvided) shared.handoff_enabled = handoffEnabled
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
     } else if (clearEmbeddingsKey) {

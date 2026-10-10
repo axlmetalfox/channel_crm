@@ -1699,6 +1699,8 @@
       "autoReplyDesc": "The bot answers new inbound messages automatically (only when no flow handles them and no agent is assigned). Hands off to a human when it can’t help.",
       "maxAutoReplies": "Max auto-replies per conversation",
       "maxAutoRepliesDesc": "After this many bot replies in one thread, the bot goes quiet.",
+      "allowHandoff": "Allow hand-off to a human",
+      "allowHandoffDesc": "On: when the bot can’t help it pauses and passes the chat to a person. Off: it never hands off and keeps replying within your instructions — use it for capture-only agents with nobody watching the inbox.",
       "handoffTo": "Hand off to",
       "handoffToDesc": "When the bot can’t help — or hits the reply cap — it pauses and routes the chat here, with a short note on what happened.",
       "handoffQueue": "Unassigned queue (any agent can pick it up)",

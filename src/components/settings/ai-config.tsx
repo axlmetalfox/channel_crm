@@ -74,6 +74,7 @@ export function AiConfig() {
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
+  const [handoffEnabled, setHandoffEnabled] = useState(true);
   const [members, setMembers] = useState<AccountMember[]>([]);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
@@ -100,6 +101,7 @@ export function AiConfig() {
         setAutoReplyEnabled(data.auto_reply_enabled);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
+        setHandoffEnabled(data.handoff_enabled !== false);
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -151,6 +153,7 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
+    handoff_enabled: handoffEnabled,
   });
 
   const handleTest = async () => {
@@ -456,6 +459,22 @@ export function AiConfig() {
               />
             </div>
 
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {t('allowHandoff')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t('allowHandoffDesc')}
+                </p>
+              </div>
+              <Switch
+                checked={handoffEnabled}
+                onCheckedChange={setHandoffEnabled}
+                disabled={disabled || !autoReplyEnabled}
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="ai-handoff">{t('handoffTo')}</Label>
               <p className="text-xs text-muted-foreground">
@@ -466,7 +485,7 @@ export function AiConfig() {
                 onValueChange={(v) =>
                   setHandoffAgentId(!v || v === HANDOFF_QUEUE ? '' : v)
                 }
-                disabled={disabled || !autoReplyEnabled}
+                disabled={disabled || !autoReplyEnabled || !handoffEnabled}
               >
                 <SelectTrigger id="ai-handoff">
                   <SelectValue />

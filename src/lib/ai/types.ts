@@ -25,6 +25,10 @@ export interface AiConfig {
    *  agent's `auth.users.id`, or null to leave it unassigned (drop into
    *  the shared queue). */
   handoffAgentId: string | null
+  /** When false the bot never hands a conversation to a human and is not
+   *  told it can: it keeps replying within the business instructions.
+   *  Meant for capture-only agents with no human in the loop. */
+  handoffEnabled: boolean
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */
