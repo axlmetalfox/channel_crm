@@ -16,6 +16,8 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { loadZernioConfig } from '@/lib/zernio/config'
+import { sendTextViaZernio } from '@/lib/zernio/send'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -66,6 +68,18 @@ export async function engineSendText(
   args: SendTextEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+
+  // Accounts connected through Zernio send there instead of Meta.
+  const zernio = await loadZernioConfig(db, args.accountId)
+  if (zernio) {
+    return sendTextViaZernio({
+      db,
+      config: zernio,
+      conversationId: args.conversationId,
+      text: args.text,
+      aiGenerated: args.aiGenerated,
+    })
+  }
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')

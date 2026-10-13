@@ -1,0 +1,188 @@
+// ============================================================
+// Minimal Zernio REST client — only what the WhatsApp channel needs:
+//   - send a text message into a conversation (24h window)
+//   - check that an API key + connected account work
+//   - register our webhook endpoint
+//
+// Docs: https://docs.zernio.com (base https://zernio.com/api/v1, bearer
+// API key). Errors surface as `ZernioError` with the HTTP status so
+// callers can tell a bad key (401) from an unknown account (404).
+// ============================================================
+
+export const ZERNIO_DEFAULT_BASE_URL = 'https://zernio.com/api/v1'
+const REQUEST_TIMEOUT_MS = 20_000
+
+export class ZernioError extends Error {
+  readonly status: number
+  readonly code: string | null
+  constructor(message: string, status: number, code: string | null = null) {
+    super(message)
+    this.name = 'ZernioError'
+    this.status = status
+    this.code = code
+  }
+}
+
+/**
+ * API root without a trailing slash. Override with `ZERNIO_API_BASE`
+ * (operator-controlled, https only — the bearer key is sent there).
+ */
+export function zernioBaseUrl(): string {
+  const raw = process.env.ZERNIO_API_BASE?.trim()
+  if (!raw) return ZERNIO_DEFAULT_BASE_URL
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new ZernioError('ZERNIO_API_BASE is not a valid URL.', 500)
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new ZernioError('ZERNIO_API_BASE must be a plain https URL.', 500)
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+}
+
+interface RequestOpts {
+  apiKey: string
+  method: 'GET' | 'POST'
+  path: string
+  body?: unknown
+  idempotencyKey?: string
+}
+
+async function zernioRequest<T>(opts: RequestOpts): Promise<T> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${opts.apiKey}`,
+    Accept: 'application/json',
+  }
+  if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
+
+  let res: Response
+  try {
+    res = await fetch(`${zernioBaseUrl()}${opts.path}`, {
+      method: opts.method,
+      headers,
+      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    const timedOut = err instanceof DOMException && err.name === 'TimeoutError'
+    throw new ZernioError(
+      timedOut ? 'Zernio took too long to respond.' : 'Could not reach Zernio.',
+      timedOut ? 504 : 502,
+    )
+  }
+
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if (!res.ok) {
+    const message =
+      (typeof data?.error === 'string' && data.error) ||
+      (typeof data?.message === 'string' && data.message) ||
+      `Zernio API error (${res.status})`
+    throw new ZernioError(
+      message,
+      res.status,
+      typeof data?.code === 'string' ? data.code : null,
+    )
+  }
+  return (data ?? {}) as T
+}
+
+/**
+ * Send a plain text message into an existing Zernio conversation.
+ * Only valid inside the 24h window after the customer's last message,
+ * which is always the case for a reply to an inbound message.
+ * Returns Zernio's message id.
+ */
+export async function sendZernioText(args: {
+  apiKey: string
+  accountId: string
+  conversationId: string
+  text: string
+  idempotencyKey?: string
+}): Promise<{ messageId: string }> {
+  const res = await zernioRequest<{ data?: { messageId?: string } }>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: `/inbox/conversations/${encodeURIComponent(args.conversationId)}/messages`,
+    body: { accountId: args.accountId, message: args.text },
+    idempotencyKey: args.idempotencyKey,
+  })
+  const messageId = res.data?.messageId
+  if (!messageId) {
+    throw new ZernioError('Zernio accepted the message but returned no id.', 502)
+  }
+  return { messageId }
+}
+
+export interface ZernioAccountHealth {
+  accountId: string
+  platform: string | null
+  username: string | null
+  status: string | null
+  /** WhatsApp only: whether Meta is delivering inbound messages to Zernio. */
+  inboundWebhookSubscribed: boolean | null
+  connection: string | null
+}
+
+/** Validate the API key and the connected account id (GET …/health). */
+export async function checkZernioAccount(
+  apiKey: string,
+  accountId: string,
+): Promise<ZernioAccountHealth> {
+  const res = await zernioRequest<Record<string, unknown>>({
+    apiKey,
+    method: 'GET',
+    path: `/accounts/${encodeURIComponent(accountId)}/health`,
+  })
+  const conn = (res.platformConnection ?? {}) as Record<string, unknown>
+  return {
+    accountId: String(res.accountId ?? accountId),
+    platform: typeof res.platform === 'string' ? res.platform : null,
+    username: typeof res.username === 'string' ? res.username : null,
+    status: typeof res.status === 'string' ? res.status : null,
+    inboundWebhookSubscribed:
+      typeof conn.inboundWebhookSubscribed === 'boolean'
+        ? conn.inboundWebhookSubscribed
+        : null,
+    connection: typeof conn.status === 'string' ? conn.status : null,
+  }
+}
+
+/** Events wacrm consumes from Zernio's inbox. */
+export const ZERNIO_WEBHOOK_EVENTS = [
+  'message.received',
+  'message.delivered',
+  'message.read',
+  'message.failed',
+] as const
+
+/**
+ * Register our webhook endpoint at Zernio, scoped to one account. We
+ * choose the signing secret (Zernio does not generate one). Returns the
+ * endpoint id when Zernio reports it.
+ */
+export async function registerZernioWebhook(args: {
+  apiKey: string
+  name: string
+  url: string
+  secret: string
+  accountId: string
+}): Promise<{ id: string | null }> {
+  const res = await zernioRequest<Record<string, unknown>>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: '/webhooks/settings',
+    body: {
+      name: args.name,
+      url: args.url,
+      events: [...ZERNIO_WEBHOOK_EVENTS],
+      secret: args.secret,
+      accountIds: [args.accountId],
+    },
+  })
+  const data = (res.data ?? res.webhook ?? res) as Record<string, unknown>
+  const id = data.id ?? data._id ?? data.webhookId
+  return { id: typeof id === 'string' ? id : null }
+}

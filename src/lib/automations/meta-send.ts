@@ -5,6 +5,8 @@ import {
   engineSendInteractiveList,
 } from '@/lib/flows/meta-send'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { loadZernioConfig } from '@/lib/zernio/config'
+import { sendTextViaZernio } from '@/lib/zernio/send'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -111,6 +113,22 @@ type SendInput =
 
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+
+  // Accounts connected through Zernio send there instead of Meta. Only
+  // plain text is supported on that channel for now; templates need
+  // Meta's template API.
+  const zernio = await loadZernioConfig(db, input.accountId)
+  if (zernio) {
+    if (input.kind !== 'text') {
+      throw new Error('Template messages are not supported on the Zernio channel yet')
+    }
+    return sendTextViaZernio({
+      db,
+      config: zernio,
+      conversationId: input.conversationId,
+      text: input.text,
+    })
+  }
 
   // Scope the contact + config lookups by account_id, not user_id.
   // The engine uses the service-role client (bypassing RLS); without
