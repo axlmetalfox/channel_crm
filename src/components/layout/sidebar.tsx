@@ -191,8 +191,13 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <MessageSquare className="h-4 w-4" />
             </div>
-            <span className="text-sm font-semibold text-foreground">
-              {t("title")}
+            <span className="flex flex-col leading-tight">
+              <span className="text-sm font-semibold text-foreground">
+                {t("title")}
+              </span>
+              <span className="text-[10px] font-medium text-muted-foreground">
+                {t("tagline")}
+              </span>
             </span>
           </Link>
           <button
