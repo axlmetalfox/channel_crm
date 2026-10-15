@@ -18,7 +18,7 @@ Cada llamada al modelo queda en `ai_usage_log` con tokens y, desde la migración
 
 `router_credits` es NULL en proveedores que no lo informan (p. ej. api.openai.com directo) y en las filas anteriores a la migración.
 
-Conversión a dinero: **supuesto** de 500 créditos del router ≈ 5,99 USD (≈ 0,012 USD por crédito del router). Hay que confirmarlo con la factura de Hostinger antes de fijar precios.
+Conversión a dinero: **confirmada el 2026-10-15** con la compra real: 500 créditos del router = 5,99 USD, es decir **0,01198 USD por crédito del router** (≈ 0,012).
 
 ## 3. Consultas para analizar el costo
 Ejecutar como `supabase_admin` (el panel del cliente no las expone).
