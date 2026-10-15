@@ -13,11 +13,13 @@ interface AiConfigRow {
   handoff_agent_id: string | null
   handoff_enabled: boolean
   lead_capture_enabled: boolean
+  non_text_reply: string | null
+  reply_limit_reply: string | null
   embeddings_api_key: string | null
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, embeddings_api_key'
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, embeddings_api_key'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -84,6 +86,8 @@ export async function loadAiConfig(
     // row shape) keeps the original behaviour.
     handoffEnabled: row.handoff_enabled !== false,
     leadCaptureEnabled: row.lead_capture_enabled === true,
+    nonTextReply: row.non_text_reply?.trim() || null,
+    replyLimitReply: row.reply_limit_reply?.trim() || null,
     embeddingsApiKey,
   }
 }

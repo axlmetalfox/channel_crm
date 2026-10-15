@@ -16,6 +16,8 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     handoffAgentId: null,
     handoffEnabled: true,
     leadCaptureEnabled: false,
+    nonTextReply: null,
+    replyLimitReply: null,
     embeddingsApiKey: null,
     ...overrides,
   }

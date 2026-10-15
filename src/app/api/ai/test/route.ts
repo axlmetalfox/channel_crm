@@ -74,6 +74,8 @@ export async function POST(request: Request) {
         handoffAgentId: null,
         handoffEnabled: true,
         leadCaptureEnabled: false,
+        nonTextReply: null,
+        replyLimitReply: null,
         embeddingsApiKey: null,
       })
     } catch (err) {

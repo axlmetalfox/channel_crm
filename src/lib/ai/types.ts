@@ -33,6 +33,10 @@ export interface AiConfig {
    *  wacrm then extracts the lead and sends it to the account's CRM via
    *  the `lead.captured` webhook. Needs the OpenAI-compatible provider. */
   leadCaptureEnabled: boolean
+  /** Fixed reply to a non-text message; null = built-in default. */
+  nonTextReply: string | null
+  /** Fixed reply sent once at the reply cap; null = built-in default. */
+  replyLimitReply: string | null
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */

@@ -85,6 +85,18 @@ export function aiRequestTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REQUEST_TIMEOUT_MS
 }
 
+const DEFAULT_REPLY_CAP_RESET_HOURS = 6
+
+/**
+ * Hours of silence after which a conversation that hit the auto-reply cap
+ * gets its reply budget back (a customer who returns later is a new
+ * exchange, not a loop). Override with `AI_REPLY_CAP_RESET_HOURS`.
+ */
+export function aiReplyCapResetHours(): number {
+  const raw = Number(process.env.AI_REPLY_CAP_RESET_HOURS)
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REPLY_CAP_RESET_HOURS
+}
+
 /** How many recent text messages to feed the model. Override with
  *  `AI_CONTEXT_MESSAGE_LIMIT`. */
 export function aiContextMessageLimit(): number {

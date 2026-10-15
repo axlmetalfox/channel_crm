@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   dispatchFlows: vi.fn(),
   runAutomations: vi.fn(),
   dispatchAi: vi.fn(),
+  dispatchNonText: vi.fn(),
   dispatchWebhook: vi.fn(),
   state: {
     conversation: null as Record<string, unknown> | null,
@@ -26,7 +27,10 @@ vi.mock('@/lib/contacts/dedupe', () => ({
 }))
 vi.mock('@/lib/flows/engine', () => ({ dispatchInboundToFlows: h.dispatchFlows }))
 vi.mock('@/lib/automations/engine', () => ({ runAutomationsForTrigger: h.runAutomations }))
-vi.mock('@/lib/ai/auto-reply', () => ({ dispatchInboundToAiReply: h.dispatchAi }))
+vi.mock('@/lib/ai/auto-reply', () => ({
+  dispatchInboundToAiReply: h.dispatchAi,
+  dispatchNonTextAutoReply: h.dispatchNonText,
+}))
 vi.mock('@/lib/webhooks/deliver', () => ({ dispatchWebhookEvent: h.dispatchWebhook }))
 
 import { sendTextViaZernio } from './send'
@@ -220,6 +224,15 @@ describe('processZernioInbound', () => {
       mediaUrl: 'https://x/y.png',
     })
     expect(h.dispatchAi).not.toHaveBeenCalled()
+    // …but it is not left unanswered: the fixed non-text reply handles it.
+    expect(h.dispatchNonText).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 'acct-1', conversationId: 'cv-1' }),
+    )
+  })
+
+  it('keeps the non-text reply for messages without text only', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, INBOUND)
+    expect(h.dispatchNonText).not.toHaveBeenCalled()
   })
 })
 

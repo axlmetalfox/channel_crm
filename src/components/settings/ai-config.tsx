@@ -76,6 +76,9 @@ export function AiConfig() {
   const [handoffAgentId, setHandoffAgentId] = useState('');
   const [handoffEnabled, setHandoffEnabled] = useState(true);
   const [leadCaptureEnabled, setLeadCaptureEnabled] = useState(false);
+  // Empty = use the built-in default text.
+  const [nonTextReply, setNonTextReply] = useState('');
+  const [replyLimitReply, setReplyLimitReply] = useState('');
   const [members, setMembers] = useState<AccountMember[]>([]);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
@@ -104,6 +107,8 @@ export function AiConfig() {
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHandoffEnabled(data.handoff_enabled !== false);
         setLeadCaptureEnabled(data.lead_capture_enabled === true);
+        setNonTextReply(data.non_text_reply ?? '');
+        setReplyLimitReply(data.reply_limit_reply ?? '');
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -157,6 +162,8 @@ export function AiConfig() {
     handoff_agent_id: handoffAgentId || null,
     handoff_enabled: handoffEnabled,
     lead_capture_enabled: leadCaptureEnabled,
+    non_text_reply: nonTextReply.trim() || null,
+    reply_limit_reply: replyLimitReply.trim() || null,
   });
 
   const handleTest = async () => {
@@ -460,6 +467,38 @@ export function AiConfig() {
                 disabled={disabled || !autoReplyEnabled}
                 className="w-20"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-reply-limit">{t('replyLimitReply')}</Label>
+              <Textarea
+                id="ai-reply-limit"
+                value={replyLimitReply}
+                onChange={(e) => setReplyLimitReply(e.target.value)}
+                placeholder={t('fixedReplyPlaceholder')}
+                rows={2}
+                maxLength={500}
+                disabled={disabled || !autoReplyEnabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('replyLimitReplyDesc')}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-non-text">{t('nonTextReply')}</Label>
+              <Textarea
+                id="ai-non-text"
+                value={nonTextReply}
+                onChange={(e) => setNonTextReply(e.target.value)}
+                placeholder={t('fixedReplyPlaceholder')}
+                rows={2}
+                maxLength={500}
+                disabled={disabled || !autoReplyEnabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('nonTextReplyDesc')}
+              </p>
             </div>
 
             <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">

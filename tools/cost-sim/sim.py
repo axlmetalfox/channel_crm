@@ -25,9 +25,9 @@ def call(messages):
     return d["choices"][0]["message"]["content"].strip(), d.get("usage", {}).get("credits_charged", 0)
 
 
-def answer_for(bot):
+def answer_for(bot, extra=()):
     b = bot.lower()
-    rules = [
+    rules = list(extra) + [
         (r"c[oó]mo te llamas|tu nombre\?|con qui[eé]n", "Alex"),
         (r"autoriz", "Sí, autorizo"),
         (r"apellido|nombre completo", "Alex Baquero"),
@@ -47,7 +47,7 @@ def answer_for(bot):
     return "ok"
 
 
-def run(title, first_turns, extra_after=None, max_turns=18):
+def run(title, first_turns, extra_after=None, max_turns=18, extra_rules=()):
     print("=" * 70)
     print(title)
     print("=" * 70)
@@ -63,7 +63,7 @@ def run(title, first_turns, extra_after=None, max_turns=18):
         elif closed:
             break
         else:
-            u = answer_for(msgs[-1]["content"])
+            u = answer_for(msgs[-1]["content"], extra_rules)
         msgs.append({"role": "user", "content": u})
         print("CLIENTE:", u)
         try:
@@ -91,3 +91,10 @@ if which in ("C", "all"):
 if which in ("D", "all"):
     run("D. Pide hablar con una persona y es repuestos",
         ["Buenas, quiero hablar con una persona", "Alex", "Se me dañó la selladora de mi máquina flow pack, necesito un repuesto"])
+if which in ("E", "all"):
+    run("E. Solo quiere el precio (debe pedir solo nombre y telefono)",
+        ["Hola, solo quiero saber el precio de una empacadora de sachets", "Solo dame el precio por favor, no quiero llenar tanta información"],
+        extra_rules=[(r"precio|datos|asesor", "Solo quiero el precio, no quiero dar tantos datos")][:0] + [(r"tel[eé]fono|contacto", "Alex Baquero, 3112580000")])
+if which in ("F", "all"):
+    run("F. Da muchos datos de entrada (no debe repetir preguntas)",
+        ["Hola, soy Laura Pérez de Dulces La Fiesta en Medellín, Colombia. Necesito empacar gomitas en bolsas de 200g, mi correo es laura@dulcesfiesta.co y mi celular 3001234567", "Sí, autorizo"])

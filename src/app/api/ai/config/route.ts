@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -126,6 +126,16 @@ export async function POST(request: Request) {
       return bad('Lead capture needs the OpenAI-compatible provider.')
     }
 
+    // Fixed replies for non-text messages and for the reply cap. Absent →
+    // unchanged; a blank string clears it (back to the built-in default).
+    const fixedReply = (v: unknown): string | null | undefined => {
+      if (typeof v !== 'string') return undefined
+      const s = v.trim().slice(0, 500)
+      return s || null
+    }
+    const nonTextReply = fixedReply(body.non_text_reply)
+    const replyLimitReply = fixedReply(body.reply_limit_reply)
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
     // Embeddings key (optional, for semantic KB search): a non-empty
@@ -180,6 +190,8 @@ export async function POST(request: Request) {
           handoffAgentId: null,
           handoffEnabled,
           leadCaptureEnabled,
+          nonTextReply: null,
+          replyLimitReply: null,
           embeddingsApiKey: null,
         })
       } catch (err) {
@@ -225,6 +237,8 @@ export async function POST(request: Request) {
     if (handoffProvided) shared.handoff_agent_id = handoffAgentId
     if (handoffEnabledProvided) shared.handoff_enabled = handoffEnabled
     if (leadCaptureProvided) shared.lead_capture_enabled = leadCaptureEnabled
+    if (nonTextReply !== undefined) shared.non_text_reply = nonTextReply
+    if (replyLimitReply !== undefined) shared.reply_limit_reply = replyLimitReply
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
     } else if (clearEmbeddingsKey) {

@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
+    lastBot: null as { created_at: string; content_text: string | null } | null,
   },
 }))
 
@@ -35,6 +36,17 @@ vi.mock('./admin-client', () => ({
           in: () => chain,
           limit: () =>
             Promise.resolve({ data: h.state.autoResponders, error: null }),
+        }
+        return chain
+      }
+      if (table === 'messages') {
+        // .select().eq().eq().order().limit().maybeSingle() → last bot message
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          order: () => chain,
+          limit: () => chain,
+          maybeSingle: () => Promise.resolve({ data: h.state.lastBot, error: null }),
         }
         return chain
       }
@@ -59,7 +71,8 @@ vi.mock('./admin-client', () => ({
   }),
 }))
 
-import { dispatchInboundToAiReply } from './auto-reply'
+import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from './auto-reply'
+import { fallbackText } from './fallback'
 
 const ARGS = {
   accountId: 'acct-1',
@@ -80,6 +93,8 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     handoffAgentId: null,
     handoffEnabled: true,
     leadCaptureEnabled: false,
+    nonTextReply: null,
+    replyLimitReply: null,
     embeddingsApiKey: null,
     ...overrides,
   }
@@ -95,6 +110,7 @@ beforeEach(() => {
   h.state.claim = true
   h.state.updatePayload = null
   h.state.rpcCalls = []
+  h.state.lastBot = null
   h.loadAiConfig.mockResolvedValue(aiConfig())
   h.buildConversationContext.mockResolvedValue([{ role: 'user', content: 'hi' }])
   h.retrieveKnowledge.mockResolvedValue([])
@@ -172,13 +188,19 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
-  it('skips when the per-conversation cap is reached', async () => {
+  it('does not call the model once the per-conversation cap is reached', async () => {
     h.state.conv = {
       assigned_agent_id: null,
       ai_autoreply_disabled: false,
       ai_reply_count: 3,
     }
+    // The customer was already told about the limit moments ago.
+    h.state.lastBot = {
+      created_at: new Date().toISOString(),
+      content_text: fallbackText('replyLimit', null),
+    }
     await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).not.toHaveBeenCalled()
     expect(h.engineSendText).not.toHaveBeenCalled()
   })
 
@@ -315,3 +337,87 @@ describe('dispatchInboundToAiReply — lead capture', () => {
     expect(h.captureLead).not.toHaveBeenCalled()
   })
 })
+
+describe('dispatchInboundToAiReply — reply cap', () => {
+  const atCap = () => {
+    h.state.conv = { assigned_agent_id: null, ai_autoreply_disabled: false, ai_reply_count: 3 }
+  }
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+
+  it('tells the customer once, instead of going silent, when the cap is hit recently', async () => {
+    atCap()
+    h.state.lastBot = { created_at: hoursAgo(0.2), content_text: 'una pregunta' }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: fallbackText('replyLimit', null), conversationId: 'conv-1' }),
+    )
+  })
+
+  it('does not repeat the limit message to a customer who keeps writing', async () => {
+    atCap()
+    h.state.lastBot = { created_at: hoursAgo(0.2), content_text: fallbackText('replyLimit', null) }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.generateReply).not.toHaveBeenCalled()
+  })
+
+  it('uses the account’s own limit message when it set one', async () => {
+    atCap()
+    h.state.lastBot = { created_at: hoursAgo(0.2), content_text: 'x' }
+    h.loadAiConfig.mockResolvedValue(aiConfig({ replyLimitReply: 'Vuelve más tarde.' }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Vuelve más tarde.' }))
+  })
+
+  it('gives the budget back after a quiet spell and answers normally', async () => {
+    atCap()
+    h.state.lastBot = { created_at: hoursAgo(7), content_text: 'una pregunta' }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.state.updatePayload).toEqual({ ai_reply_count: 0 })
+    expect(h.generateReply).toHaveBeenCalledTimes(1)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Hello!' }))
+  })
+})
+
+describe('dispatchNonTextAutoReply', () => {
+  it('asks for text instead of staying silent', async () => {
+    await dispatchNonTextAutoReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: fallbackText('nonText', null), conversationId: 'conv-1', aiGenerated: true }),
+    )
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.state.rpcCalls).toEqual([]) // no reply slot used
+  })
+
+  it('does not answer a second non-text message in a row', async () => {
+    h.state.lastBot = { created_at: new Date().toISOString(), content_text: fallbackText('nonText', null) }
+    await dispatchNonTextAutoReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('uses the account’s own text', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ nonTextReply: 'Escríbeme, por favor.' }))
+    await dispatchNonTextAutoReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(expect.objectContaining({ text: 'Escríbeme, por favor.' }))
+  })
+
+  it('stays out when auto-reply is off, a person owns the thread, or the bot was paused', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplyEnabled: false }))
+    await dispatchNonTextAutoReply(ARGS)
+    h.loadAiConfig.mockResolvedValue(aiConfig())
+    h.state.conv = { assigned_agent_id: 'agent-1', ai_autoreply_disabled: false, ai_reply_count: 0 }
+    await dispatchNonTextAutoReply(ARGS)
+    h.state.conv = { assigned_agent_id: null, ai_autoreply_disabled: true, ai_reply_count: 0 }
+    await dispatchNonTextAutoReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('stands down when a message automation already answers', async () => {
+    h.state.autoResponders = [{ id: 'auto-1' }]
+    await dispatchNonTextAutoReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+})
+

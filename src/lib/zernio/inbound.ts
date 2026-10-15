@@ -4,7 +4,7 @@ import { reopenClosedConversation } from '@/lib/conversations/reopen'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
-import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound, ZernioStatus } from './events'
@@ -194,13 +194,17 @@ export async function processZernioInbound(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
-  if (!flowResult.consumed && inboundText.trim()) {
-    await dispatchInboundToAiReply({
+  if (!flowResult.consumed) {
+    const aiArgs = {
       accountId: config.accountId,
       conversationId: conversation.id,
       contactId: contact.id,
       configOwnerUserId: config.userId,
-    })
+    }
+    // Text goes to the agent; anything else (voice note, photo…) gets a
+    // fixed "please write it" reply instead of silence.
+    if (inboundText.trim()) await dispatchInboundToAiReply(aiArgs)
+    else await dispatchNonTextAutoReply(aiArgs)
   }
 
   await dispatchWebhookEvent(db, config.accountId, 'message.received', {

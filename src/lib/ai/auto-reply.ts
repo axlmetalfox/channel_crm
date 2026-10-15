@@ -3,7 +3,8 @@ import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
-import { buildSystemPrompt } from './defaults'
+import { aiReplyCapResetHours, buildSystemPrompt } from './defaults'
+import { fallbackText } from './fallback'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
@@ -60,14 +61,7 @@ export async function dispatchInboundToAiReply(
     // avoid double-texting the customer. (Relationship triggers like
     // `first_inbound_message` don't count — they're not per-message
     // auto-responders.)
-    const { data: autoResponders } = await db
-      .from('automations')
-      .select('id')
-      .eq('account_id', accountId)
-      .eq('is_active', true)
-      .in('trigger_type', ['new_message_received', 'keyword_match'])
-      .limit(1)
-    if (autoResponders && autoResponders.length > 0) return
+    if (await hasActiveAutoResponder(db, accountId)) return
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
@@ -78,8 +72,21 @@ export async function dispatchInboundToAiReply(
     if (conv.assigned_agent_id) return // a human owns this thread
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
-    // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    // below (this read can race a concurrent inbound). At the cap the
+    // conversation either gets its budget back (the customer returned
+    // after a quiet spell) or is told, once, that the limit was reached —
+    // never silence.
+    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) {
+      const resumed = await resolveReplyCap({
+        db,
+        config,
+        accountId,
+        conversationId,
+        contactId,
+        configOwnerUserId,
+      })
+      if (!resumed) return
+    }
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
@@ -223,5 +230,114 @@ export async function dispatchInboundToAiReply(
     }
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
+  }
+}
+
+/** True when the account has a message-level automation that already
+ *  answers every inbound (the AI stands down so the customer is not
+ *  texted twice). */
+async function hasActiveAutoResponder(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from('automations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('is_active', true)
+    .in('trigger_type', ['new_message_received', 'keyword_match'])
+    .limit(1)
+  return !!data && data.length > 0
+}
+
+/** The last message the bot sent in a conversation, if any. */
+async function lastBotMessage(
+  db: ReturnType<typeof supabaseAdmin>,
+  conversationId: string,
+): Promise<{ created_at: string; content_text: string | null } | null> {
+  const { data } = await db
+    .from('messages')
+    .select('created_at, content_text')
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'bot')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (data as { created_at: string; content_text: string | null } | null) ?? null
+}
+
+/**
+ * The conversation is at its auto-reply cap. If the bot has been quiet
+ * for a while the customer is coming back to a fresh exchange: give the
+ * budget back and let the reply proceed (returns true). Otherwise tell
+ * the customer once that the limit was reached (returns false), instead
+ * of leaving them unanswered.
+ */
+async function resolveReplyCap(args: {
+  db: ReturnType<typeof supabaseAdmin>
+  config: NonNullable<Awaited<ReturnType<typeof loadAiConfig>>>
+  accountId: string
+  conversationId: string
+  contactId: string
+  configOwnerUserId: string
+}): Promise<boolean> {
+  const { db, config, accountId, conversationId, contactId, configOwnerUserId } = args
+  const last = await lastBotMessage(db, conversationId)
+  const quietMs = last ? Date.now() - new Date(last.created_at).getTime() : Infinity
+
+  if (quietMs >= aiReplyCapResetHours() * 3_600_000) {
+    await db.from('conversations').update({ ai_reply_count: 0 }).eq('id', conversationId)
+    return true
+  }
+
+  const text = fallbackText('replyLimit', config.replyLimitReply)
+  if (last?.content_text?.trim() === text) return false // already told them
+  await engineSendText({
+    accountId,
+    userId: configOwnerUserId,
+    conversationId,
+    contactId,
+    text,
+    aiGenerated: true,
+  })
+  return false
+}
+
+/**
+ * The customer sent something that is not text (a voice note, a photo, a
+ * document…). The agent only reads text, so reply with a fixed message
+ * asking for text instead of staying silent. Same eligibility gates as
+ * the text path; costs no AI call and does not use the reply budget. A
+ * second non-text message in a row is not answered again.
+ */
+export async function dispatchNonTextAutoReply(args: DispatchArgs): Promise<void> {
+  const { accountId, conversationId, contactId, configOwnerUserId } = args
+  try {
+    const db = supabaseAdmin()
+    const config = await loadAiConfig(db, accountId)
+    if (!config || !config.autoReplyEnabled) return
+    if (await hasActiveAutoResponder(db, accountId)) return
+
+    const { data: conv } = await db
+      .from('conversations')
+      .select('assigned_agent_id, ai_autoreply_disabled')
+      .eq('id', conversationId)
+      .maybeSingle()
+    if (!conv || conv.assigned_agent_id || conv.ai_autoreply_disabled) return
+
+    const text = fallbackText('nonText', config.nonTextReply)
+    const last = await lastBotMessage(db, conversationId)
+    if (last?.content_text?.trim() === text) return
+
+    await engineSendText({
+      accountId,
+      userId: configOwnerUserId,
+      conversationId,
+      contactId,
+      text,
+      aiGenerated: true,
+    })
+  } catch (err) {
+    console.error('[ai auto-reply] non-text reply failed:', err)
   }
 }
