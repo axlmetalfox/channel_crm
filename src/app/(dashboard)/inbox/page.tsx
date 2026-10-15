@@ -206,7 +206,19 @@ function InboxPageInner() {
         .eq("account_id", accountId)
         .maybeSingle();
 
-      setWhatsappConnected(data?.status === "connected");
+      if (data?.status === "connected") {
+        setWhatsappConnected(true);
+        return;
+      }
+
+      // No Meta connection: the account may be connected through Zernio.
+      try {
+        const res = await fetch("/api/zernio/status");
+        const zernio = res.ok ? await res.json() : null;
+        setWhatsappConnected(zernio?.connected === true);
+      } catch {
+        setWhatsappConnected(false);
+      }
     };
 
     checkConnection();
