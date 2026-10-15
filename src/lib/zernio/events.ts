@@ -21,8 +21,12 @@ export interface ZernioInbound {
   conversationId: string
   /** Zernio account id the message arrived on. */
   accountId: string | null
-  /** Sender phone as Zernio reports it (digits, may carry a "+"). */
-  phone: string
+  /** Sender phone as Zernio reports it (digits, may carry a "+"). Null
+   *  when the customer uses a WhatsApp username and WhatsApp hides their
+   *  number: such a customer is known by the conversation id alone. */
+  phone: string | null
+  /** WhatsApp username (`@name`), when the sender has one. */
+  username: string | null
   name: string | null
   text: string | null
   contentType: 'text' | 'image' | 'document' | 'audio' | 'video'
@@ -81,7 +85,7 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
     const phone =
       str(sender?.phoneNumber) ??
       (senderId && /^\+?\d{8,15}$/.test(senderId) ? senderId : null)
-    if (!messageId || !conversationId || !phone) return null
+    if (!messageId || !conversationId) return null
 
     const text = str(message.text)
     const attachment =
@@ -101,6 +105,7 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
       conversationId,
       accountId: str(account?.accountId),
       phone,
+      username: str(sender?.whatsappUsername),
       name: str(sender?.name),
       text,
       contentType,

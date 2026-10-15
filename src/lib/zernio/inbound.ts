@@ -61,6 +61,51 @@ async function findOrCreateContact(
   return { contact: data as Row, wasCreated: true }
 }
 
+/**
+ * Contact for a sender whose phone number WhatsApp hides (a username
+ * account). Matched through the conversation Zernio already knows them by;
+ * created with an empty phone otherwise (the unique phone index ignores
+ * empty values, and replies go by conversation id, not by number).
+ */
+async function findOrCreateHiddenNumberContact(
+  db: SupabaseClient,
+  config: ZernioConfig,
+  msg: ZernioInbound,
+): Promise<{ contact: Row; wasCreated: boolean } | null> {
+  const { data: known } = await db
+    .from('conversations')
+    .select('contact_id')
+    .eq('account_id', config.accountId)
+    .eq('zernio_conversation_id', msg.conversationId)
+    .limit(1)
+    .maybeSingle()
+  if (known?.contact_id) {
+    const { data: contact } = await db
+      .from('contacts')
+      .select('*')
+      .eq('id', known.contact_id as string)
+      .maybeSingle()
+    if (contact) return { contact: contact as Row, wasCreated: false }
+  }
+
+  const label = msg.name || (msg.username ? `@${msg.username.replace(/^@/, '')}` : null)
+  const { data, error } = await db
+    .from('contacts')
+    .insert({
+      account_id: config.accountId,
+      user_id: config.userId,
+      phone: '',
+      name: label || 'WhatsApp',
+    })
+    .select()
+    .single()
+  if (error) {
+    console.error('[zernio inbound] contact create failed:', error)
+    return null
+  }
+  return { contact: data as Row, wasCreated: true }
+}
+
 async function findOrCreateConversation(
   db: SupabaseClient,
   config: ZernioConfig,
@@ -104,10 +149,13 @@ export async function processZernioInbound(
   config: ZernioConfig,
   msg: ZernioInbound,
 ): Promise<void> {
-  const phone = normalizePhone(msg.phone)
-  if (!phone) return
+  const phone = msg.phone ? normalizePhone(msg.phone) : ''
 
-  const contactOutcome = await findOrCreateContact(db, config, phone, msg.name)
+  // A customer who uses a WhatsApp username has no visible number: they are
+  // recognised by Zernio's conversation id instead.
+  const contactOutcome = phone
+    ? await findOrCreateContact(db, config, phone, msg.name)
+    : await findOrCreateHiddenNumberContact(db, config, msg)
   if (!contactOutcome) return
   const contact = contactOutcome.contact
 

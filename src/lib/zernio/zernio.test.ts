@@ -74,11 +74,19 @@ describe('parseZernioEvent', () => {
     expect(ev).toMatchObject({ contentType: 'image', mediaUrl: 'https://x/y.png' })
   })
 
-  it('ignores an inbound message with no phone or conversation', () => {
-    expect(
-      parseZernioEvent({ ...received, message: { ...received.message, sender: { name: 'x' } } }),
-    ).toBeNull()
+  it('ignores an inbound message with no conversation', () => {
     expect(parseZernioEvent({ ...received, conversation: {} })).toBeNull()
+  })
+
+  it('keeps a message from a sender whose number WhatsApp hides (username account)', () => {
+    const ev = parseZernioEvent({
+      ...received,
+      message: {
+        ...received.message,
+        sender: { id: 'US.13491208655302741918', name: 'Ana', whatsappUsername: 'ana.g' },
+      },
+    })
+    expect(ev).toMatchObject({ kind: 'message', phone: null, username: 'ana.g', name: 'Ana' })
   })
 
   it('falls back to a numeric sender id when phoneNumber is absent', () => {
@@ -92,7 +100,7 @@ describe('parseZernioEvent', () => {
         ...received,
         message: { ...received.message, sender: { id: 'US.13491208655302741918' } },
       }),
-    ).toBeNull()
+    ).toMatchObject({ phone: null })
   })
 
   it('describes a payload by field names and types only', () => {

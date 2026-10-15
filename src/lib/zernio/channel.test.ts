@@ -163,6 +163,7 @@ const INBOUND: ZernioInbound = {
   conversationId: 'zconv-1',
   accountId: 'zacc',
   phone: '+57 311 258 0000',
+  username: null,
   name: 'Ana',
   text: 'Hola',
   contentType: 'text',
@@ -192,6 +193,20 @@ describe('processZernioInbound', () => {
       'message.received',
       expect.objectContaining({ whatsapp_message_id: 'zmsg-in' }),
     )
+  })
+
+  it('accepts a customer whose number WhatsApp hides, creating a contact with no phone', async () => {
+    h.state.existingConversation = false
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      phone: null,
+      username: 'ana.g',
+      name: null,
+    })
+    const contactInsert = written('contacts', 'insert')[0]
+    expect(contactInsert.values).toMatchObject({ phone: '', name: '@ana.g' })
+    expect(h.findExistingContact).not.toHaveBeenCalled()
+    expect(h.dispatchAi).toHaveBeenCalled()
   })
 
   it('remembers the Zernio conversation id when it changed', async () => {
