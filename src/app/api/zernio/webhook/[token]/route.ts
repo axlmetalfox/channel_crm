@@ -51,9 +51,35 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Zernio's "send test event" carries `test: true`; acknowledge it.
+  // One line per call, so a missing message can be told apart from one we
+  // received and ignored. Event names only — no message content or phones.
+  const eventName =
+    payload && typeof payload === 'object' && 'event' in payload
+      ? String((payload as { event: unknown }).event)
+      : 'unknown'
+  const eventId = request.headers.get('x-zernio-event-id')
+  console.info(`[zernio webhook] received ${eventName} (account ${config.accountId}, event ${eventId ?? 'n/a'})`)
+
+  // Zernio's "send test event" carries `test: true`: acknowledge it without
+  // processing, so a test can never open a conversation or trigger an AI reply.
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    (payload as { test?: unknown }).test === true
+  ) {
+    console.info('[zernio webhook] test event acknowledged')
+    return NextResponse.json({ status: 'test' }, { status: 200 })
+  }
+
   const event = parseZernioEvent(payload)
-  if (!event) return NextResponse.json({ status: 'ignored' }, { status: 200 })
+  if (!event) {
+    // Something we do not act on (reaction, account events, …) or a shape we
+    // could not read. The top-level keys help tell which.
+    const keys =
+      payload && typeof payload === 'object' ? Object.keys(payload).join(',') : typeof payload
+    console.info(`[zernio webhook] ignored ${eventName} (keys: ${keys})`)
+    return NextResponse.json({ status: 'ignored' }, { status: 200 })
+  }
 
   after(async () => {
     try {
