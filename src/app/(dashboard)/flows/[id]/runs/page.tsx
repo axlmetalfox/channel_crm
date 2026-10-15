@@ -17,7 +17,8 @@ import {
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { dateFnsLocale } from "@/lib/date-locale";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -224,6 +225,7 @@ function RunCard({
   onToggle: () => void;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const locale = useLocale();
   const meta = STATUS_META[run.status];
   const StatusIcon = meta.icon;
   const contactLabel =
@@ -231,6 +233,7 @@ function RunCard({
   const duration = run.ended_at
     ? formatDistanceToNow(new Date(run.ended_at), {
         addSuffix: false,
+        locale: dateFnsLocale(locale),
       })
     : null;
   return (

@@ -1,19 +1,24 @@
-import { getRequestConfig } from 'next-intl/server';
+import { cookies, headers } from 'next/headers'
+import { getRequestConfig } from 'next-intl/server'
+import { LOCALE_COOKIE, resolveLocale } from './locale'
 
 export default getRequestConfig(async () => {
-  // Read the locale from the environment, defaulting to 'en'
-  const locale = process.env.NEXT_PUBLIC_APP_LOCALE || 'en';
+  const [cookieStore, headerStore] = await Promise.all([cookies(), headers()])
 
-  let messages;
+  // Saved choice > browser language > deployment default > English.
+  const locale = resolveLocale({
+    cookie: cookieStore.get(LOCALE_COOKIE)?.value,
+    acceptLanguage: headerStore.get('accept-language'),
+    envDefault: process.env.NEXT_PUBLIC_APP_LOCALE,
+  })
+
+  let messages
   try {
-    messages = (await import(`../../messages/${locale}.json`)).default;
-  } catch (error) {
-    // Fallback to English if the dictionary for the requested locale doesn't exist yet
-    messages = (await import(`../../messages/en.json`)).default;
+    messages = (await import(`../../messages/${locale}.json`)).default
+  } catch {
+    // Fallback to English if the dictionary for the locale is missing.
+    messages = (await import(`../../messages/en.json`)).default
   }
 
-  return {
-    locale,
-    messages
-  };
-});
+  return { locale, messages }
+})
