@@ -23,6 +23,8 @@ export function normalizeUsage(raw: {
   prompt?: unknown
   completion?: unknown
   total?: unknown
+  /** Gateway-reported cost of the call (see `AiUsage.routerCredits`). */
+  credits?: unknown
 }): AiUsage | null {
   const num = (v: unknown): number =>
     typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0
@@ -33,7 +35,14 @@ export function normalizeUsage(raw: {
   if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) {
     return null
   }
-  return { promptTokens, completionTokens, totalTokens }
+  const credits = raw.credits
+  const routerCredits =
+    typeof credits === 'number' && Number.isFinite(credits) && credits >= 0
+      ? credits
+      : undefined
+  return routerCredits === undefined
+    ? { promptTokens, completionTokens, totalTokens }
+    : { promptTokens, completionTokens, totalTokens, routerCredits }
 }
 
 /** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */

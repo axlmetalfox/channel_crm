@@ -54,6 +54,11 @@ export interface AiUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+  /** What the gateway charged for this call, in the gateway's own credits
+   *  (the Hostinger AI router reports `usage.credits_charged`). Absent on
+   *  providers that do not report it. This is OUR cost, kept for margin
+   *  analysis; it is never shown to customers. */
+  routerCredits?: number
 }
 
 /** Raw text + usage a provider adapter returns before handoff parsing. */
