@@ -9,7 +9,9 @@ export default getRequestConfig(async () => {
   const locale = resolveLocale({
     cookie: cookieStore.get(LOCALE_COOKIE)?.value,
     acceptLanguage: headerStore.get('accept-language'),
-    envDefault: process.env.NEXT_PUBLIC_APP_LOCALE,
+    // APP_DEFAULT_LOCALE is read at runtime (change it and restart); the
+    // NEXT_PUBLIC_ one is baked in at build time and kept for compatibility.
+    envDefault: process.env.APP_DEFAULT_LOCALE || process.env.NEXT_PUBLIC_APP_LOCALE,
   })
 
   let messages

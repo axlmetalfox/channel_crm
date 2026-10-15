@@ -44,7 +44,8 @@ export function fromAcceptLanguage(header: string | null | undefined): AppLocale
 
 /**
  * The language to render in: the user's saved choice, else what their
- * browser asks for, else the deployment default (`NEXT_PUBLIC_APP_LOCALE`),
+ * browser asks for, else the deployment default (`APP_DEFAULT_LOCALE` at
+ * runtime, or the build-time `NEXT_PUBLIC_APP_LOCALE`),
  * else English.
  */
 export function resolveLocale(args: {
