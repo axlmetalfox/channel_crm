@@ -33,7 +33,7 @@
 //
 //   <GatedButton
 //     canAct={canCreate}
-//     gateReason="create broadcasts"
+//     gateReason="createBroadcasts"
 //     onClick={() => router.push("/broadcasts/new")}
 //   >
 //     <Plus className="h-4 w-4" /> New Broadcast
@@ -46,6 +46,7 @@
 // ============================================================
 
 import type { ComponentProps, ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -74,10 +75,12 @@ export function GatedButton({
   children,
   ...rest
 }: GatedButtonProps) {
+  const t = useTranslations("GatedButton");
   const effectivelyDisabled = disabled || !canAct;
-  const tooltip = !canAct && gateReason
-    ? `Read-only — your role can't ${gateReason}`
-    : title;
+  // `gateReason` is a key of the GatedButton messages (createFlows, …);
+  // a free-text reason is shown as given.
+  const action = gateReason && t.has(gateReason) ? t(gateReason) : gateReason;
+  const tooltip = !canAct && gateReason ? t("readOnly", { action: action ?? "" }) : title;
 
   return (
     <span

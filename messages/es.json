@@ -779,7 +779,8 @@
           "name": "Nombre",
           "phone": "Teléfono",
           "email": "Correo"
-        }
+        },
+        "enterValue": "Escribe un valor..."
       },
       "scheduleSend": {
         "title": "Revisar y enviar",
@@ -1012,7 +1013,8 @@
         "matchWordHint": "Coincide con la palabra clave solo como palabra independiente, así \"k\" ya no se activa con \"gracias\". Es lo mejor para palabras clave cortas en idiomas que separan las palabras con espacios; usa Contiene para idiomas que se escriben sin espacios.",
         "matchExact": "Exacta",
         "closeConversationHint": "Cambia el estado de la conversación a \"cerrada\". No requiere configuración."
-      }
+      },
+      "schedulePlaceholder": "Expresión cron o HH:mm"
     }
   },
   "Flows": {
@@ -1618,7 +1620,8 @@
       "cancel": "Cancelar",
       "signingOut": "Cerrando sesión…",
       "signOutEverywhere": "Cerrar sesión en todas partes",
-      "signOutFailed": "No se pudo cerrar la sesión: {message}"
+      "signOutFailed": "No se pudo cerrar la sesión: {message}",
+      "namePlaceholder": "María Pérez"
     },
     "appearance": {
       "title": "Apariencia",
@@ -1754,7 +1757,9 @@
       "addDoc": "Agregar documento",
       "reindex": "Reindexar",
       "reindexTooltip": "Volver a generar los embeddings de todos los documentos (por ejemplo, después de agregar una clave de embeddings)",
-      "loading": "Cargando…"
+      "loading": "Cargando…",
+      "editTitle": "Editar",
+      "deleteTitle": "Eliminar"
     }
   },
   "AuthPages": {
@@ -1830,5 +1835,113 @@
     "emptyTitle": "Aún no hay notificaciones",
     "emptyDesc": "Verás una alerta aquí cuando alguien te asigne una conversación.",
     "unread": "Sin leer"
+  },
+  "AgentsPage": {
+    "title": "Agentes de IA",
+    "subtitle": "Tu agente de IA con tu propia clave: configúralo y pruébalo en el Playground antes de que responda a los clientes en la bandeja de entrada.",
+    "tabPlayground": "Playground",
+    "tabSetup": "Configuración",
+    "tabUsage": "Uso",
+    "playgroundTitle": "Playground",
+    "playgroundSubtitle": "— prueba las respuestas como si fueras un cliente",
+    "reset": "Reiniciar",
+    "emptyTitle": "Envía un mensaje para ver cómo respondería tu agente.",
+    "emptyHint": "Usa tu base de conocimiento y se comporta exactamente como el bot de respuesta automática, incluido el traspaso.",
+    "goSetup": "¿Aún sin configurar? Ve a Configuración",
+    "handoffNote": "Aquí traspasaría la conversación a una persona",
+    "leadNote": "Aquí capturaría un lead (el Playground no envía nada a tu CRM)",
+    "thinking": "Pensando…",
+    "inputPlaceholder": "Escribe un mensaje de cliente…",
+    "notConfigured": "Aún no hay un agente configurado: termina primero la Configuración.",
+    "noReply": "No se pudo obtener una respuesta.",
+    "unreachable": "No se pudo conectar con el agente.",
+    "usageTitle": "Uso de tokens",
+    "usageDesc": "Tokens gastados con la clave de tu proveedor en borradores y en el bot de respuesta automática. Solo se cuentan: aquí no se guarda el contenido de los mensajes.",
+    "lastDays": "Últimos {days} días",
+    "loadFailed": "No se pudo cargar el uso",
+    "noUsage": "Aún no hay uso de IA en los últimos {days} días.",
+    "noUsageHint": "Se irá llenando a medida que el asistente redacte y responda automáticamente.",
+    "statTotal": "Tokens totales",
+    "statCalls": "Llamadas al modelo",
+    "statAuto": "Respuesta automática",
+    "statDrafts": "Borradores",
+    "perDay": "Tokens por día",
+    "byModel": "Por modelo",
+    "modelLine": "{tokens} tok · {calls} {calls, plural, =1 {llamada} other {llamadas}}",
+    "partial": "Se muestra una ventana parcial: el uso es tan alto que aquí solo se resumen los registros más recientes."
+  },
+  "QuickReplies": {
+    "title": "Respuestas rápidas",
+    "description": "Textos reutilizables, en texto simple o como mensaje interactivo guardado, que los agentes pueden insertar desde el editor de la bandeja de entrada.",
+    "newBtn": "Nueva respuesta rápida",
+    "empty": "Aún no hay respuestas rápidas. Crea una para reutilizarla en tus conversaciones.",
+    "nameRequired": "Ponle un nombre a la respuesta rápida.",
+    "saveFailed": "No se pudo guardar la respuesta rápida.",
+    "updated": "Respuesta rápida actualizada.",
+    "created": "Respuesta rápida creada.",
+    "deleteConfirm": "¿Eliminar esta respuesta rápida?",
+    "deleteFailed": "No se pudo eliminar la respuesta rápida.",
+    "dialogEdit": "Editar respuesta rápida",
+    "dialogNew": "Nueva respuesta rápida",
+    "nameLabel": "Nombre",
+    "namePlaceholder": "p. ej., Horario de atención",
+    "tabText": "Texto",
+    "tabInteractive": "Interactivo",
+    "textPlaceholder": "El texto del mensaje que se insertará",
+    "cancel": "Cancelar",
+    "save": "Guardar"
+  },
+  "InteractiveBuilder": {
+    "replyButtons": "Botones de respuesta",
+    "list": "Lista",
+    "body": "Cuerpo",
+    "bodyPlaceholder": "Lo que el cliente lee encima de las opciones",
+    "headerOptional": "Encabezado (opcional)",
+    "footerOptional": "Pie (opcional)",
+    "showIds": "Mostrar los IDs de respuesta (avanzado)",
+    "preview": "Vista previa",
+    "buttonsCount": "Botones ({count}/{max})",
+    "idPlaceholder": "id",
+    "buttonLabel": "Texto del botón",
+    "addButton": "Agregar botón",
+    "listButtonLabel": "Texto del botón de la lista",
+    "rowsCount": "Filas ({count}/{max})",
+    "sectionTitle": "Título de la sección (opcional)",
+    "rowTitle": "Título de la fila",
+    "descriptionOptional": "Descripción (opcional)",
+    "addRow": "Agregar fila",
+    "addSection": "Agregar sección"
+  },
+  "FlowHeader": {
+    "back": "Volver a Flujos",
+    "namePlaceholder": "Nombre del flujo",
+    "nameLabel": "Nombre del flujo",
+    "unsavedTitle": "Cambios sin guardar: pulsa Guardar para conservarlos",
+    "edited": "Editado",
+    "runs": "Ejecuciones",
+    "delete": "Eliminar",
+    "pause": "Pausar",
+    "activate": "Activar",
+    "fixIssues": "Corrige los problemas de abajo antes de activar",
+    "save": "Guardar",
+    "descPlaceholder": "Agrega una descripción breve (interna: los clientes no la ven)",
+    "descLabel": "Descripción del flujo",
+    "statusDraft": "Borrador",
+    "statusActive": "Activo",
+    "statusArchived": "Archivado"
+  },
+  "GatedButton": {
+    "readOnly": "Solo lectura: tu rol no puede {action}",
+    "createAutomations": "crear automatizaciones",
+    "createBroadcasts": "crear difusiones",
+    "addContacts": "agregar o importar contactos",
+    "deleteContacts": "eliminar contactos",
+    "createFlows": "crear flujos",
+    "createPipelines": "crear embudos",
+    "createDeals": "crear negocios",
+    "sendMessages": "enviar mensajes"
+  },
+  "Common": {
+    "loading": "Cargando..."
   }
 }

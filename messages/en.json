@@ -779,7 +779,8 @@
           "name": "Name",
           "phone": "Phone",
           "email": "Email"
-        }
+        },
+        "enterValue": "Enter value..."
       },
       "scheduleSend": {
         "title": "Review & Send",
@@ -1012,7 +1013,8 @@
         "matchWordHint": "Matches the keyword only as a standalone word, so \"k\" no longer fires on \"thanks\". Best for short keywords in space-separated languages; use Contains for languages written without spaces.",
         "matchExact": "Exact",
         "closeConversationHint": "Sets the conversation status to \"closed\". No configuration needed."
-      }
+      },
+      "schedulePlaceholder": "Cron expression or HH:mm"
     }
   },
   "Flows": {
@@ -1618,7 +1620,8 @@
       "cancel": "Cancel",
       "signingOut": "Signing out…",
       "signOutEverywhere": "Sign out everywhere",
-      "signOutFailed": "Sign-out failed: {message}"
+      "signOutFailed": "Sign-out failed: {message}",
+      "namePlaceholder": "Ada Lovelace"
     },
     "appearance": {
       "title": "Appearance",
@@ -1754,7 +1757,9 @@
       "addDoc": "Add document",
       "reindex": "Reindex",
       "reindexTooltip": "Re-embed all documents (e.g. after adding an embeddings key)",
-      "loading": "Loading…"
+      "loading": "Loading…",
+      "editTitle": "Edit",
+      "deleteTitle": "Delete"
     }
   },
   "AuthPages": {
@@ -1830,5 +1835,113 @@
     "emptyTitle": "No notifications yet",
     "emptyDesc": "You’ll see an alert here when someone assigns you a conversation.",
     "unread": "Unread"
+  },
+  "AgentsPage": {
+    "title": "AI Agents",
+    "subtitle": "Your bring-your-own-key AI agent — set it up, then test it in the playground before it replies to customers in the inbox.",
+    "tabPlayground": "Playground",
+    "tabSetup": "Setup",
+    "tabUsage": "Usage",
+    "playgroundTitle": "Playground",
+    "playgroundSubtitle": "— test replies as if you were a customer",
+    "reset": "Reset",
+    "emptyTitle": "Send a message to see how your agent would reply.",
+    "emptyHint": "It uses your knowledge base and behaves exactly like the auto-reply bot — including handoff.",
+    "goSetup": "Not set up yet? Go to Setup",
+    "handoffNote": "Would hand off to a human here",
+    "leadNote": "Would capture a lead here (the Playground sends nothing to your CRM)",
+    "thinking": "Thinking…",
+    "inputPlaceholder": "Type a customer message…",
+    "notConfigured": "No agent configured yet — finish Setup first.",
+    "noReply": "Couldn’t get a reply.",
+    "unreachable": "Couldn’t reach the agent.",
+    "usageTitle": "Token usage",
+    "usageDesc": "Tokens spent on your provider key by drafts and the auto-reply bot. Counts only — no message content is stored here.",
+    "lastDays": "Last {days} days",
+    "loadFailed": "Failed to load usage",
+    "noUsage": "No AI usage in the last {days} days yet.",
+    "noUsageHint": "This fills in as the assistant drafts and auto-replies.",
+    "statTotal": "Total tokens",
+    "statCalls": "LLM calls",
+    "statAuto": "Auto-reply",
+    "statDrafts": "Drafts",
+    "perDay": "Tokens per day",
+    "byModel": "By model",
+    "modelLine": "{tokens} tok · {calls} {calls, plural, =1 {call} other {calls}}",
+    "partial": "Showing a partial window — usage is high enough that only the most recent records are summarized here."
+  },
+  "QuickReplies": {
+    "title": "Quick replies",
+    "description": "Reusable snippets — plain text or a saved interactive message — that agents can insert from the inbox composer.",
+    "newBtn": "New quick reply",
+    "empty": "No quick replies yet. Create one to reuse it across conversations.",
+    "nameRequired": "Give the quick reply a name.",
+    "saveFailed": "Couldn’t save the quick reply.",
+    "updated": "Quick reply updated.",
+    "created": "Quick reply created.",
+    "deleteConfirm": "Delete this quick reply?",
+    "deleteFailed": "Couldn’t delete the quick reply.",
+    "dialogEdit": "Edit quick reply",
+    "dialogNew": "New quick reply",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. Business hours",
+    "tabText": "Text",
+    "tabInteractive": "Interactive",
+    "textPlaceholder": "The message text to insert",
+    "cancel": "Cancel",
+    "save": "Save"
+  },
+  "InteractiveBuilder": {
+    "replyButtons": "Reply buttons",
+    "list": "List",
+    "body": "Body",
+    "bodyPlaceholder": "What the customer reads above the options",
+    "headerOptional": "Header (optional)",
+    "footerOptional": "Footer (optional)",
+    "showIds": "Show reply IDs (advanced)",
+    "preview": "Preview",
+    "buttonsCount": "Buttons ({count}/{max})",
+    "idPlaceholder": "id",
+    "buttonLabel": "Button label",
+    "addButton": "Add button",
+    "listButtonLabel": "List button label",
+    "rowsCount": "Rows ({count}/{max})",
+    "sectionTitle": "Section title (optional)",
+    "rowTitle": "Row title",
+    "descriptionOptional": "Description (optional)",
+    "addRow": "Add row",
+    "addSection": "Add section"
+  },
+  "FlowHeader": {
+    "back": "Back to Flows",
+    "namePlaceholder": "Flow name",
+    "nameLabel": "Flow name",
+    "unsavedTitle": "Unsaved changes — hit Save to persist",
+    "edited": "Edited",
+    "runs": "Runs",
+    "delete": "Delete",
+    "pause": "Pause",
+    "activate": "Activate",
+    "fixIssues": "Fix the issues below before activating",
+    "save": "Save",
+    "descPlaceholder": "Add a short description (internal — customers don’t see this)",
+    "descLabel": "Flow description",
+    "statusDraft": "Draft",
+    "statusActive": "Active",
+    "statusArchived": "Archived"
+  },
+  "GatedButton": {
+    "readOnly": "Read-only — your role can’t {action}",
+    "createAutomations": "create automations",
+    "createBroadcasts": "create broadcasts",
+    "addContacts": "add or import contacts",
+    "deleteContacts": "delete contacts",
+    "createFlows": "create flows",
+    "createPipelines": "create pipelines",
+    "createDeals": "create deals",
+    "sendMessages": "send messages"
+  },
+  "Common": {
+    "loading": "Loading..."
   }
 }

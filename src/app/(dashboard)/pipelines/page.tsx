@@ -370,7 +370,7 @@ export default function PipelinesPage() {
           <GatedButton
             variant="outline"
             canAct={canEditSettings}
-            gateReason="create pipelines"
+            gateReason="createPipelines"
             onClick={() => setNewPipelineOpen(true)}
             className="border-border bg-card text-foreground hover:bg-muted"
           >
@@ -379,7 +379,7 @@ export default function PipelinesPage() {
           </GatedButton>
           <GatedButton
             canAct={canCreateDeals}
-            gateReason="create deals"
+            gateReason="createDeals"
             disabled={!selectedPipelineId || stages.length === 0}
             onClick={() => handleAddDeal()}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
@@ -402,7 +402,7 @@ export default function PipelinesPage() {
           </p>
           <GatedButton
             canAct={canEditSettings}
-            gateReason="create pipelines"
+            gateReason="createPipelines"
             onClick={() => setNewPipelineOpen(true)}
             className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
           >
