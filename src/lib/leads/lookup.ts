@@ -128,6 +128,13 @@ export function verificationRequested(
   return false
 }
 
+/** The first word of the name on file, for a greeting. Leads kept with a
+ *  single name field carry it in last_name. */
+function greetingName(record: CrmRecord | undefined): string | null {
+  const name = record?.first_name ?? record?.last_name
+  return name?.split(/\s+/)[0] || null
+}
+
 /** True when a stored "not found" is old enough to ask again. */
 export function matchIsStale(match: CrmMatch | null, now = Date.now()): boolean {
   if (!match) return true
@@ -243,7 +250,7 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
     if (current?.status === 'found') {
       return customerContextBlock(
         current.source === 'whatsapp' ? 'registered' : 'registered_by_claim',
-        current.source === 'whatsapp' ? current.record?.first_name : null,
+        current.source === 'whatsapp' ? greetingName(current.record) : null,
       )
     }
 
