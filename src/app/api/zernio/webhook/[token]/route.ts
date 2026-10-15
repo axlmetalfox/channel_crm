@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { loadZernioConfigByToken } from '@/lib/zernio/config'
-import { parseZernioEvent } from '@/lib/zernio/events'
+import { describeShape, parseZernioEvent } from '@/lib/zernio/events'
 import { processZernioInbound, processZernioStatus } from '@/lib/zernio/inbound'
 import { verifyZernioSignature } from '@/lib/zernio/signature'
 
@@ -77,7 +77,9 @@ export async function POST(
     // could not read. The top-level keys help tell which.
     const keys =
       payload && typeof payload === 'object' ? Object.keys(payload).join(',') : typeof payload
-    console.info(`[zernio webhook] ignored ${eventName} (keys: ${keys})`)
+    console.info(
+      `[zernio webhook] ignored ${eventName} (keys: ${keys}) shape=${JSON.stringify(describeShape(payload))}`,
+    )
     return NextResponse.json({ status: 'ignored' }, { status: 200 })
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { signZernioBody, verifyZernioSignature } from './signature'
-import { parseZernioEvent } from './events'
+import { describeShape, parseZernioEvent } from './events'
 import {
   ZernioError,
   checkZernioAccount,
@@ -79,6 +79,26 @@ describe('parseZernioEvent', () => {
       parseZernioEvent({ ...received, message: { ...received.message, sender: { name: 'x' } } }),
     ).toBeNull()
     expect(parseZernioEvent({ ...received, conversation: {} })).toBeNull()
+  })
+
+  it('falls back to a numeric sender id when phoneNumber is absent', () => {
+    const ev = parseZernioEvent({
+      ...received,
+      message: { ...received.message, sender: { id: '573102035390', name: 'x' } },
+    })
+    expect(ev).toMatchObject({ kind: 'message', phone: '573102035390' })
+    expect(
+      parseZernioEvent({
+        ...received,
+        message: { ...received.message, sender: { id: 'US.13491208655302741918' } },
+      }),
+    ).toBeNull()
+  })
+
+  it('describes a payload by field names and types only', () => {
+    expect(
+      describeShape({ a: 'secret', b: { c: 5, d: [{ e: true }] }, f: null }),
+    ).toEqual({ a: 'string', b: { c: 'number', d: [{ e: 'boolean' }] }, f: 'null' })
   })
 
   it('reads delivery statuses and failures', () => {

@@ -44,6 +44,24 @@ export type ZernioEvent = ZernioInbound | ZernioStatus
 
 const ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'document'])
 
+/**
+ * The shape of a payload — field names and value types, never values —
+ * for logging an event we could not read without leaking message content
+ * or phone numbers.
+ */
+export function describeShape(value: unknown, depth = 5): unknown {
+  if (Array.isArray(value)) {
+    return value.length === 0 ? [] : [depth > 0 ? describeShape(value[0], depth - 1) : 'array']
+  }
+  if (isObj(value)) {
+    if (depth <= 0) return 'object'
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, describeShape(v, depth - 1)]),
+    )
+  }
+  return value === null ? 'null' : typeof value
+}
+
 export function parseZernioEvent(payload: unknown): ZernioEvent | null {
   if (!isObj(payload)) return null
   const event = str(payload.event)
@@ -57,7 +75,12 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
     const sender = isObj(message.sender) ? message.sender : null
     const messageId = str(message.id) ?? str(message.platformMessageId)
     const conversationId = str(conversation?.id) ?? str(message.conversationId)
-    const phone = str(sender?.phoneNumber)
+    // WhatsApp's own id for a sender is their number; use it when the
+    // phoneNumber field is absent.
+    const senderId = str(sender?.id)
+    const phone =
+      str(sender?.phoneNumber) ??
+      (senderId && /^\+?\d{8,15}$/.test(senderId) ? senderId : null)
     if (!messageId || !conversationId || !phone) return null
 
     const text = str(message.text)
