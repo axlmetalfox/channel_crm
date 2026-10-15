@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   state: {
     insertError: null as { code: string } | null,
     claimOk: true,
+    crmMatch: null as Record<string, unknown> | null,
     retryRows: [] as Record<string, unknown>[],
     updates: [] as { table: string; values: Record<string, unknown> }[],
     messages: [
@@ -61,6 +62,7 @@ function fakeDb() {
           return { data: null, error: null }
         }
         if (table === 'messages') return { data: [...h.state.messages].reverse(), error: null }
+        if (table === 'conversations') return { data: { crm_match: h.state.crmMatch }, error: null }
         if (table === 'contacts') return { data: { phone: '573112580000' }, error: null }
         if (table === 'lead_intakes') return { data: h.state.retryRows, error: null }
         return { data: null, error: null }
@@ -123,6 +125,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.state.insertError = null
   h.state.claimOk = true
+  h.state.crmMatch = null
   h.state.retryRows = []
   h.state.updates = []
   h.extractLead.mockResolvedValue({ lead: LEAD, usage: null })
@@ -163,6 +166,61 @@ describe('captureLead', () => {
         (u) => u.table === 'conversations' && u.values.ai_reply_count === 0,
       ),
     ).toBe(true)
+  })
+
+  it('completes a registered customer from the CRM record and links the existing record', async () => {
+    h.state.crmMatch = {
+      status: 'found',
+      source: 'whatsapp',
+      checked_at: '2026-10-10T11:00:00.000Z',
+      module: 'Leads',
+      id: 'zoho-9',
+      record: {
+        first_name: 'Juan',
+        last_name: 'Pérez',
+        email: 'juan@crm.co',
+        company: 'Lácteos',
+        mobile: null,
+        phone: '3001112233',
+        country: 'Colombia',
+        city: 'Cali',
+      },
+    }
+    h.extractLead.mockResolvedValue({
+      lead: {
+        ...LEAD,
+        first_name: null,
+        last_name: null,
+        email: null,
+        company: null,
+        whatsapp_number: null,
+        contact_phone: null,
+        country: null,
+        city: null,
+      },
+      usage: null,
+    })
+    await captureLead({ db: fakeDb(), ...ARGS })
+
+    const payload = h.deliver.mock.calls[0][3]
+    expect(payload.lead).toMatchObject({
+      first_name: 'Juan',
+      last_name: 'Pérez',
+      email: 'juan@crm.co',
+      city: 'Cali',
+      contact_phone: '3001112233',
+      whatsapp_number: '+573112580000',
+    })
+    expect(payload.existing_record).toEqual({ module: 'Leads', id: 'zoho-9' })
+    // The next message looks the customer up afresh.
+    expect(
+      h.state.updates.some((u) => u.table === 'conversations' && u.values.crm_match === null),
+    ).toBe(true)
+  })
+
+  it('sends existing_record as null for a customer the CRM does not know', async () => {
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.deliver.mock.calls[0][3].existing_record).toBeNull()
   })
 
   it('does nothing when this closing message was already captured', async () => {

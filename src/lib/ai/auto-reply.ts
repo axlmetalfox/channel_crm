@@ -10,6 +10,7 @@ import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { parseLeadCompletion } from '@/lib/leads/sentinel'
 import { captureLead } from '@/lib/leads/capture'
+import { lookupConfigured, resolveCustomerContext, type CrmMatch } from '@/lib/leads/lookup'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
@@ -65,7 +66,7 @@ export async function dispatchInboundToAiReply(
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
-      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
+      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count, crm_match')
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
@@ -115,12 +116,25 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
 
+    // Is this person already in the CRM? Then they are not interviewed again.
+    const customerContext =
+      config.leadCaptureEnabled && lookupConfigured()
+        ? await resolveCustomerContext({
+            db,
+            conversationId,
+            contactId,
+            stored: (conv.crm_match as CrmMatch | null) ?? null,
+            messages,
+          })
+        : null
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
       handoffEnabled: config.handoffEnabled,
       leadCapture: config.leadCaptureEnabled,
+      customerContext,
     })
 
     const generated = await generateReply({

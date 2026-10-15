@@ -5,6 +5,7 @@ import { AiError, type AiConfig, type ChatMessage } from '@/lib/ai/types'
 import { deliverWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractLead } from './extract'
 import { judgeLead, type Lead } from './schema'
+import { fillLeadFromRecord, type CrmMatch } from './lookup'
 
 // ============================================================
 // Lead capture: turn a finished AI interview into a `lead.captured`
@@ -51,6 +52,8 @@ export interface LeadPayload {
   channel_phone: string | null
   lead: Omit<Lead, 'consent_given'>
   consent: { given: true; captured_at: string }
+  /** Set when the customer was already registered in the CRM. */
+  existing_record: { module: string; id: string } | null
   transcript: { role: 'customer' | 'assistant'; text: string }[]
 }
 
@@ -222,6 +225,11 @@ async function processIntake(
       error: `${result.delivered}/${result.endpoints} endpoints accepted the lead`,
     })
   }
+  // The lead now exists in the CRM: let the next message look the customer
+  // up afresh (a first-time customer becomes a registered one).
+  if (row.conversation_id) {
+    await db.from('conversations').update({ crm_match: null }).eq('id', row.conversation_id)
+  }
   return finish('delivered', { error: null, delivered_at: new Date().toISOString() })
 }
 
@@ -266,6 +274,24 @@ async function buildPayload(
     return { status: 'pending', extra: { error: message } }
   }
 
+  // A customer the CRM already knows is not asked for their details again:
+  // complete the lead from the CRM record.
+  const { data: convRow } = await db
+    .from('conversations')
+    .select('crm_match')
+    .eq('id', row.conversation_id)
+    .maybeSingle()
+  const crm = (convRow?.crm_match as CrmMatch | null | undefined) ?? null
+
+  const { data: contact } = row.contact_id
+    ? await db.from('contacts').select('phone').eq('id', row.contact_id).maybeSingle()
+    : { data: null }
+  const channelPhone = (contact?.phone as string | null | undefined) ?? null
+
+  if (crm?.status === 'found' && crm.record) {
+    lead = fillLeadFromRecord(lead, crm.record, channelPhone)
+  }
+
   const verdict = judgeLead(lead)
   if (verdict === 'no_consent') {
     return {
@@ -283,15 +309,11 @@ async function buildPayload(
     }
   }
 
-  const { data: contact } = row.contact_id
-    ? await db.from('contacts').select('phone').eq('id', row.contact_id).maybeSingle()
-    : { data: null }
-
   const payload: LeadPayload = {
     intake_id: row.id,
     conversation_id: row.conversation_id,
     contact_id: row.contact_id,
-    channel_phone: (contact?.phone as string | null | undefined) ?? null,
+    channel_phone: channelPhone,
     lead: {
       first_name: lead.first_name,
       last_name: lead.last_name,
@@ -306,6 +328,8 @@ async function buildPayload(
       request_type: lead.request_type,
     },
     consent: { given: true, captured_at: row.created_at },
+    existing_record:
+      crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     transcript: trimTranscript(transcript),
   }
   return { payload }

@@ -122,6 +122,9 @@ export function buildSystemPrompt(args: {
   /** Auto-reply only. When true the model is taught to mark the closing
    *  message of an interview with LEAD_COMPLETE_SENTINEL. */
   leadCapture?: boolean
+  /** Auto-reply only. Result of the CRM lookup for this turn (see
+   *  src/lib/leads/lookup.ts), appended after the business instructions. */
+  customerContext?: string | null
 }): string {
   const { userPrompt, mode, knowledge } = args
   const handoffEnabled = args.handoffEnabled !== false
@@ -153,6 +156,10 @@ export function buildSystemPrompt(args: {
 
   if (userPrompt && userPrompt.trim()) {
     parts.push(`Business context and instructions:\n${userPrompt.trim()}`)
+  }
+
+  if (mode === 'auto_reply' && args.customerContext) {
+    parts.push(args.customerContext)
   }
 
   if (knowledge && knowledge.length > 0) {

@@ -14,10 +14,19 @@ SCAFFOLD = [
     "Business context and instructions:\n" + PROMPT,
 ]
 SYSTEM = "\n\n".join(SCAFFOLD)
+CTX = {"text": None}
+
+# Mirrors customerContextBlock() in src/lib/leads/lookup.ts
+NEVER = 'Never read out, confirm or hint at any stored detail (name, company, email, phone, city or past requests): only say whether the person is registered.'
+BLOCKS = {
+    'registered': 'CRM LOOKUP RESULT (verified by the system, not by the customer): this customer is already registered in the business\'s CRM and their first name is "Ana". Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
+    'registered_by_claim': 'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
+    'claim_not_found': 'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.',
+}
 
 
 def call(messages):
-    body = json.dumps({"model": MODEL, "messages": [{"role": "system", "content": SYSTEM}] + messages,
+    body = json.dumps({"model": MODEL, "messages": [{"role": "system", "content": SYSTEM + ("\n\n" + CTX["text"] if CTX["text"] else "")}] + messages,
                        "max_completion_tokens": 1024}).encode()
     req = urllib.request.Request(URL, data=body, headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json", "User-Agent": "curl/8.5.0", "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -39,6 +48,7 @@ def answer_for(bot, extra=()):
         (r"ciudad", "Bogotá"),
         (r"pa[ií]s", "Colombia"),
         (r"algo m[aá]s|adicional", "No, nada más"),
+        (r"tipo y modelo|modelo de|placa", "Es una flow pack FP 340, se dañó la selladora"),
         (r"tipo de producto|qu[eé] (producto|necesitas)|empacar|requerimiento|presentar", "Necesito una máquina de empaque al vacío para bloques de queso, producción industrial"),
     ]
     for pat, ans in rules:
@@ -47,11 +57,13 @@ def answer_for(bot, extra=()):
     return "ok"
 
 
-def run(title, first_turns, extra_after=None, max_turns=18, extra_rules=()):
+def run(title, first_turns, extra_after=None, max_turns=18, extra_rules=(), ctx=None):
     print("=" * 70)
     print(title)
     print("=" * 70)
     msgs, credits = [], 0.0
+    CTX["text"] = None
+    ctx = dict(ctx or {})  # {number of customer messages so far: block key or None}
     pending = list(first_turns)
     closed = False
     after = list(extra_after or [])
@@ -65,6 +77,9 @@ def run(title, first_turns, extra_after=None, max_turns=18, extra_rules=()):
         else:
             u = answer_for(msgs[-1]["content"], extra_rules)
         msgs.append({"role": "user", "content": u})
+        n_user = sum(1 for m in msgs if m["role"] == "user")
+        if n_user in ctx:
+            CTX["text"] = BLOCKS.get(ctx[n_user])
         print("CLIENTE:", u)
         try:
             bot, c = call(msgs)
@@ -98,3 +113,14 @@ if which in ("E", "all"):
 if which in ("F", "all"):
     run("F. Da muchos datos de entrada (no debe repetir preguntas)",
         ["Hola, soy Laura Pérez de Dulces La Fiesta en Medellín, Colombia. Necesito empacar gomitas en bolsas de 200g, mi correo es laura@dulcesfiesta.co y mi celular 3001234567", "Sí, autorizo"])
+if which in ("G", "all"):
+    run("G. Cliente registrado por su numero de WhatsApp",
+        ["Hola, necesito un repuesto para mi flow pack"], ctx={1: "registered"})
+if which in ("H", "all"):
+    run("H. Dice que ya hablo antes -> verificacion -> registrado",
+        ["Hola, ya habia hablado con ustedes antes y me estan pidiendo los datos otra vez", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
+        ctx={2: "registered_by_claim"})
+if which in ("I", "all"):
+    run("I. Dice que ya hablo antes -> verificacion -> NO encontrado",
+        ["Hola, creo que ya me tienen registrado", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
+        ctx={2: "claim_not_found", 3: None})
