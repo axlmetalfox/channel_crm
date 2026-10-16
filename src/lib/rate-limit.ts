@@ -143,6 +143,9 @@ export const RATE_LIMITS = {
   /** Account creation through an invitation link (public, per-IP). A few
    *  people join a team in one sitting; far more is someone probing. */
   invitationSignup: { limit: 8, windowMs: 3_600_000 },
+  /** Preparing / sending a lead by hand from the inbox (per user). Each
+   *  prepare is one model call. */
+  manualLead: { limit: 20, windowMs: 60_000 },
   /** Admin-only account / member-management actions: create/revoke
    *  invitation, rename account, change member role, remove member,
    *  transfer ownership. 30/min per user is comfortably above any

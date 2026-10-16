@@ -69,6 +69,8 @@ export interface LeadPayload {
   existing_record: { module: string; id: string } | null
   /** The ad or post the customer's chat started from, when it did. */
   attribution: Attribution | null
+  /** Set when a person sent the lead from the inbox instead of the AI. */
+  registered_by: { user_id: string; name: string | null } | null
   transcript: { role: 'customer' | 'assistant'; text: string }[]
 }
 
@@ -189,7 +191,7 @@ function isDue(row: IntakeRow, now: Date): boolean {
  * Take one attempt at an intake: extract if needed, then deliver.
  * Returns the resulting status, or null when another worker had it.
  */
-async function processIntake(
+export async function processIntake(
   db: SupabaseClient,
   config: AiConfig | null,
   row: IntakeRow,
@@ -364,6 +366,7 @@ async function buildPayload(
     existing_record:
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution,
+    registered_by: null,
     transcript: trimTranscript(transcript),
   }
   return { payload }
@@ -378,7 +381,7 @@ async function buildPayload(
  * data, so the extraction needs the earlier part of the chat. The
  * extraction prompt tells the model to describe only the latest request.
  */
-async function loadInterviewMessages(
+export async function loadInterviewMessages(
   db: SupabaseClient,
   conversationId: string,
   intakeCreatedAt: string,
@@ -403,7 +406,7 @@ async function loadInterviewMessages(
 }
 
 /** Keep the most recent part of the transcript within the size budget. */
-function trimTranscript(messages: ChatMessage[]): LeadPayload['transcript'] {
+export function trimTranscript(messages: ChatMessage[]): LeadPayload['transcript'] {
   const out: LeadPayload['transcript'] = []
   let used = 0
   for (let i = messages.length - 1; i >= 0; i--) {

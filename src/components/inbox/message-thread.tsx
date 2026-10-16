@@ -26,8 +26,7 @@ import {
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
-  PanelRightClose,
-} from "lucide-react";
+  PanelRightClose, ClipboardCheck } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +49,8 @@ import {
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
+import { SendToZohoDialog } from "./send-to-zoho-dialog";
+import { useCan } from "@/hooks/use-can";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
 import { renderTemplateBody } from "@/lib/whatsapp/template-body";
@@ -173,6 +174,8 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [zohoOpen, setZohoOpen] = useState(false);
+  const canSendToCrm = useCan("send-messages");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -466,6 +469,13 @@ export function MessageThread({
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
       if (!conversation) return;
+
+      // `/enviarZoho` is a command, not a message: it opens the review form
+      // that sends this conversation to the CRM. It is never sent to the customer.
+      if (/^\/enviarzoho\s*$/i.test(text.trim())) {
+        setZohoOpen(true);
+        return;
+      }
 
       const tempId = `temp-${Date.now()}`;
 
@@ -965,6 +975,22 @@ export function MessageThread({
             </button>
           )}
 
+          {/* Send this conversation to the CRM by hand — the same as the
+              /enviarZoho command, and reachable when the 24h window closed
+              and the composer is locked. */}
+          {canSendToCrm && (
+            <button
+              type="button"
+              onClick={() => setZohoOpen(true)}
+              aria-label={t("sendToCrm")}
+              title={t("sendToCrm")}
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{t("sendToCrm")}</span>
+            </button>
+          )}
+
           {/* Manual refresh — forces a refetch of the messages + the
               conversation list (the parent bumps its resyncToken). Useful
               when realtime missed an event or the agent just wants to be
@@ -1182,6 +1208,12 @@ export function MessageThread({
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+      />
+
+      <SendToZohoDialog
+        open={zohoOpen}
+        onOpenChange={setZohoOpen}
+        conversationId={conversation.id}
       />
 
       <TemplatePicker
