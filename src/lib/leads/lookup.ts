@@ -102,20 +102,14 @@ export async function lookupCustomer(clue: {
 }
 
 const EMAIL_IN_TEXT = /[^\s@<>()]+@[^\s@<>()]+\.[^\s@<>()]{2,}/g
-const PHONE_IN_TEXT = /\+?\d[\d\s().-]{8,}\d/g
 
-/** Emails and phone numbers a customer typed in a message. */
-export function contactClues(text: string): { email: string | null; phone: string | null } {
-  const email = normalizeEmail((text.match(EMAIL_IN_TEXT) ?? [])[0])
-  let phone: string | null = null
-  for (const candidate of text.replace(EMAIL_IN_TEXT, ' ').match(PHONE_IN_TEXT) ?? []) {
-    const digits = candidate.replace(/\D/g, '')
-    if (digits.length >= 10 && digits.length <= 15) {
-      phone = digits
-      break
-    }
-  }
-  return { email, phone }
+/**
+ * The email a customer typed in a message. Verification is by email only:
+ * a phone typed by hand rarely matches the CRM's format (country code,
+ * area code, separators), which would give false answers.
+ */
+export function contactEmail(text: string): string | null {
+  return normalizeEmail((text.match(EMAIL_IN_TEXT) ?? [])[0])
 }
 
 /** Whether the last assistant message asked the customer to verify. */
@@ -142,7 +136,13 @@ export function matchIsStale(match: CrmMatch | null, now = Date.now()): boolean 
   return now - new Date(match.checked_at).getTime() >= NOT_FOUND_RECHECK_MS
 }
 
-export type CrmContextKind = 'registered' | 'registered_by_claim' | 'claim_not_found' | 'claim_unavailable'
+export type CrmContextKind =
+  | 'registered'
+  | 'registered_by_claim'
+  | 'claim_not_found'
+  | 'claim_unavailable'
+  | 'claim_no_email'
+  | 'ask_verification'
 
 /** The instruction block appended to the system prompt for this turn. */
 export function customerContextBlock(kind: CrmContextKind, firstName?: string | null): string {
@@ -158,15 +158,19 @@ export function customerContextBlock(kind: CrmContextKind, firstName?: string | 
       )
     case 'registered_by_claim':
       return (
-        'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' +
+        'CRM LOOKUP RESULT (verified by the system): the email the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' +
         never
       )
     case 'claim_not_found':
       return (
-        'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.'
+        'CRM LOOKUP RESULT (verified by the system): the email the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.'
       )
     case 'claim_unavailable':
       return 'CRM LOOKUP RESULT: the registry could not be checked right now. Do not mention this; continue with the normal data-collection steps.'
+    case 'claim_no_email':
+      return 'CRM LOOKUP RESULT: the customer did not give an email address, so no check was made. Do not insist: continue with the normal data-collection steps from where the conversation is.'
+    case 'ask_verification':
+      return 'CRM LOOKUP RESULT: this customer writes from a WhatsApp account that hides their phone number, so the registry could not be checked automatically. In this reply, greet them and ask the business\'s VERIFICACIÓN question (the fixed phrase) as your only question, before any data-collection step.'
   }
 }
 
@@ -207,9 +211,10 @@ interface ResolveArgs {
 
 /**
  * Work out the CRM context for this turn: look the WhatsApp number up
- * the first time (and again when a "not found" has gone stale), and
- * run a lookup on what the customer just typed when the bot asked them
- * to verify. Persists what is worth keeping. Returns the prompt block,
+ * the first time (and again when a "not found" has gone stale); when the
+ * number is hidden, have the bot ask for an email once; and look up the
+ * email the customer gives when the bot asked them to verify. Persists
+ * what is worth keeping. Returns the prompt block,
  * or null when nothing needs saying. Never throws.
  */
 export async function resolveCustomerContext(args: ResolveArgs): Promise<string | null> {
@@ -221,28 +226,27 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
       await db.from('conversations').update({ crm_match: m }).eq('id', conversationId)
     }
 
-    // 1. The number the customer is writing from.
-    if (matchIsStale(match)) {
-      const { data: contact } = await db
-        .from('contacts')
-        .select('phone')
-        .eq('id', contactId)
-        .maybeSingle()
-      const phone = (contact?.phone as string | null | undefined) ?? null
-      if (phone) {
-        const found = await lookupCustomer({ phone })
-        if (found.status === 'found') {
-          await save({
-            status: 'found',
-            source: 'whatsapp',
-            checked_at: new Date().toISOString(),
-            module: found.module,
-            id: found.id,
-            record: found.record,
-          })
-        } else if (found.status === 'not_found') {
-          await save({ status: 'not_found', source: 'whatsapp', checked_at: new Date().toISOString() })
-        }
+    // 1. The number the customer is writing from (when WhatsApp shows it).
+    const { data: contact } = await db
+      .from('contacts')
+      .select('phone')
+      .eq('id', contactId)
+      .maybeSingle()
+    const phone = ((contact?.phone as string | null | undefined) ?? '').trim()
+
+    if (phone && matchIsStale(match)) {
+      const found = await lookupCustomer({ phone })
+      if (found.status === 'found') {
+        await save({
+          status: 'found',
+          source: 'whatsapp',
+          checked_at: new Date().toISOString(),
+          module: found.module,
+          id: found.id,
+          record: found.record,
+        })
+      } else if (found.status === 'not_found') {
+        await save({ status: 'not_found', source: 'whatsapp', checked_at: new Date().toISOString() })
       }
     }
 
@@ -257,24 +261,28 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
     // 2. The customer answered the bot's "are you in our system?" question.
     if (verificationRequested(messages)) {
       const last = [...messages].reverse().find((m) => m.role === 'user')
-      const clues = last ? contactClues(last.content) : { email: null, phone: null }
-      if (clues.email || clues.phone) {
-        const found = await lookupCustomer(clues)
-        if (found.status === 'found') {
-          await save({
-            status: 'found',
-            source: 'claimed',
-            checked_at: new Date().toISOString(),
-            module: found.module,
-            id: found.id,
-            record: found.record,
-          })
-          return customerContextBlock('registered_by_claim')
-        }
-        return customerContextBlock(
-          found.status === 'not_found' ? 'claim_not_found' : 'claim_unavailable',
-        )
+      const email = last ? contactEmail(last.content) : null
+      if (!email) return customerContextBlock('claim_no_email')
+      const found = await lookupCustomer({ email })
+      if (found.status === 'found') {
+        await save({
+          status: 'found',
+          source: 'claimed',
+          checked_at: new Date().toISOString(),
+          module: found.module,
+          id: found.id,
+          record: found.record,
+        })
+        return customerContextBlock('registered_by_claim')
       }
+      return customerContextBlock(
+        found.status === 'not_found' ? 'claim_not_found' : 'claim_unavailable',
+      )
+    }
+
+    // 3. No visible number: offer the email check once, on the first reply.
+    if (!phone && !messages.some((m) => m.role === 'assistant')) {
+      return customerContextBlock('ask_verification')
     }
     return null
   } catch (err) {

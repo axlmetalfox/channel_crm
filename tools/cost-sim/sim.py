@@ -20,8 +20,9 @@ CTX = {"text": None}
 NEVER = 'Never read out, confirm or hint at any stored detail (name, company, email, phone, city or past requests): only say whether the person is registered.'
 BLOCKS = {
     'registered': 'CRM LOOKUP RESULT (verified by the system, not by the customer): this customer is already registered in the business\'s CRM and their first name is "Ana". Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
-    'registered_by_claim': 'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
-    'claim_not_found': 'CRM LOOKUP RESULT (verified by the system): the email or phone number the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.',
+    'registered_by_claim': 'CRM LOOKUP RESULT (verified by the system): the email the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
+    'claim_not_found': 'CRM LOOKUP RESULT (verified by the system): the email the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.',
+    'ask_verification': 'CRM LOOKUP RESULT: this customer writes from a WhatsApp account that hides their phone number, so the registry could not be checked automatically. In this reply, greet them and ask the business\'s VERIFICACIÓN question (the fixed phrase) as your only question, before any data-collection step.',
 }
 
 
@@ -124,3 +125,11 @@ if which in ("I", "all"):
     run("I. Dice que ya hablo antes -> verificacion -> NO encontrado",
         ["Hola, creo que ya me tienen registrado", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
         ctx={2: "claim_not_found", 3: None})
+if which in ("J", "all"):
+    run("J. Numero oculto -> pregunta de verificacion por correo -> registrado",
+        ["Hola", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
+        ctx={1: "ask_verification", 2: "registered_by_claim"})
+if which in ("K", "all"):
+    run("K. Numero oculto -> verificacion por correo -> NO encontrado -> flujo normal",
+        ["Hola, necesito un repuesto", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
+        ctx={1: "ask_verification", 2: "claim_not_found", 3: None})

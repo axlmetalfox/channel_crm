@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Lead } from './schema'
 import {
-  contactClues,
+  contactEmail,
   customerContextBlock,
   fillLeadFromRecord,
   lookupConfigured,
@@ -41,20 +41,15 @@ afterEach(() => {
 const reply = (body: unknown, ok = true) =>
   fetchMock.mockResolvedValue({ ok, status: ok ? 200 : 500, json: async () => body })
 
-const ASK = 'Permíteme verificar si ya te encuentras en nuestro sistema, ¿me confirmas tu correo?'
+const ASK = 'Permíteme verificar si ya te encuentras en nuestro sistema, ¿me confirmas tu correo electrónico?'
 
-describe('contactClues', () => {
-  it('finds an email and a phone in free text', () => {
-    expect(contactClues('Mi correo es Ana@X.co y mi cel +57 300 111 2233')).toEqual({
-      email: 'ana@x.co',
-      phone: '573001112233',
-    })
+describe('contactEmail', () => {
+  it('finds an email in free text', () => {
+    expect(contactEmail('Mi correo es Ana@X.co, gracias')).toBe('ana@x.co')
   })
-  it('ignores short numbers and plain text', () => {
-    expect(contactClues('Necesito 2000 bolsas')).toEqual({ email: null, phone: null })
-  })
-  it('does not take the digits of an email as a phone', () => {
-    expect(contactClues('a3001112233@x.co').phone).toBeNull()
+  it('ignores phone numbers and plain text', () => {
+    expect(contactEmail('Mi cel es +57 300 111 2233')).toBeNull()
+    expect(contactEmail('Necesito 2000 bolsas')).toBeNull()
   })
 })
 
@@ -237,6 +232,54 @@ describe('resolveCustomerContext', () => {
       await resolveCustomerContext({ db: db(), ...args, stored: fresh(), messages }),
     ).toMatch(/could not be checked/)
     expect(saved).toHaveLength(0)
+  })
+
+  it('does not look a typed phone up: verification is by email only', async () => {
+    const out = await resolveCustomerContext({
+      db: db(),
+      ...args,
+      stored: fresh(),
+      messages: [
+        { role: 'assistant', content: ASK },
+        { role: 'user', content: 'mi cel es 3001112233' },
+      ],
+    })
+    expect(out).toMatch(/did not give an email/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('offers the email check once, on the first reply, when the number is hidden', async () => {
+    const first = await resolveCustomerContext({
+      db: db(''),
+      ...args,
+      stored: null,
+      messages: [{ role: 'user', content: 'Hola' }],
+    })
+    expect(first).toMatch(/hides their phone number/)
+    expect(fetchMock).not.toHaveBeenCalled()
+    // Already replied once: no second offer, no lookup.
+    const later = await resolveCustomerContext({
+      db: db(''),
+      ...args,
+      stored: null,
+      messages: [
+        { role: 'user', content: 'Hola' },
+        { role: 'assistant', content: 'Hola, ¿cómo te llamas?' },
+        { role: 'user', content: 'Ana' },
+      ],
+    })
+    expect(later).toBeNull()
+  })
+
+  it('does not offer the check when the number is visible', async () => {
+    reply({ found: false })
+    const out = await resolveCustomerContext({
+      db: db(),
+      ...args,
+      stored: null,
+      messages: [{ role: 'user', content: 'Hola' }],
+    })
+    expect(out).toBeNull()
   })
 
   it('does not look anything up outside a verification', async () => {
