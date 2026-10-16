@@ -245,23 +245,13 @@ describe('processZernioInbound', () => {
     )
   })
 
-  it('closes a conversation that opens with the blank template, with no reply', async () => {
+  it('answers the share-button text even with its blanks unfilled (it comes from ads)', async () => {
     await processZernioInbound(fakeDb(), CONFIG, {
       ...INBOUND,
       text: '¡Hola! mi nombre es ___ y busco información sobre ___',
     })
-    expect(written('conversations', 'update').some((o) => o.values?.status === 'closed')).toBe(true)
-    expect(h.dispatchFlows).not.toHaveBeenCalled()
-    expect(h.dispatchAi).not.toHaveBeenCalled()
-    expect(h.dispatchNonText).not.toHaveBeenCalled()
-  })
-
-  it('still answers the template when the person filled it in', async () => {
-    await processZernioInbound(fakeDb(), CONFIG, {
-      ...INBOUND,
-      text: '¡Hola! mi nombre es Felipe y busco información sobre una máquina para empacar',
-    })
     expect(h.dispatchAi).toHaveBeenCalled()
+    expect(written('conversations', 'update').some((o) => o.values?.status === 'closed')).toBe(false)
   })
 
   it('keeps the non-text reply for messages without text only', async () => {
