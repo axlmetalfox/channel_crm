@@ -1495,6 +1495,20 @@
       "owner": "Owner",
       "ownerHint": "Full control over account and billing"
     },
+    "assignment": {
+      "title": "Assign a conversation to a person after inactivity",
+      "roundRobin": "Assignments will follow a Round Robin protocol across the team of agents.",
+      "enable": "Turn on automatic assignment",
+      "enableDesc": "Open or pending conversations with no owner that have been idle this long are handed out to the agents, one after another.",
+      "after": "After",
+      "unit": "Unit",
+      "minutes": "minutes",
+      "hours": "hours",
+      "note": "Minimum 5 minutes. Assignment only happens while the AI agent is off duty (when people are working). Once a conversation is assigned, the AI agent stops answering it.",
+      "save": "Save",
+      "saved": "Rule saved",
+      "saveFailed": "Could not save the rule"
+    },
     "zernio": {
       "title": "WhatsApp through Zernio",
       "description": "Alternative to connecting your own Meta app: use a WhatsApp number connected in Zernio. Messages arrive through a webhook that TUYO CRM registers for you, and replies are sent through Zernio.",

@@ -1495,6 +1495,20 @@
       "owner": "Propietario",
       "ownerHint": "Control total de la cuenta y la facturación"
     },
+    "assignment": {
+      "title": "Asignar conversación a un humano después de inactividad",
+      "roundRobin": "Las asignaciones se realizarán con protocolo Round Robin entre el equipo de agentes.",
+      "enable": "Activar la asignación automática",
+      "enableDesc": "Las conversaciones abiertas o pendientes sin dueño que lleven este tiempo sin actividad se reparten entre los agentes, uno tras otro.",
+      "after": "Después de",
+      "unit": "Unidad",
+      "minutes": "minutos",
+      "hours": "horas",
+      "note": "Mínimo 5 minutos. Solo se asigna cuando el agente de IA está fuera de turno (cuando hay personas atendiendo). Al asignarse una conversación, el agente de IA deja de responderla.",
+      "save": "Guardar",
+      "saved": "Regla guardada",
+      "saveFailed": "No se pudo guardar la regla"
+    },
     "zernio": {
       "title": "WhatsApp a través de Zernio",
       "description": "Alternativa a conectar tu propia app de Meta: usa un número de WhatsApp conectado en Zernio. Los mensajes llegan por un webhook que TUYO CRM registra por ti, y las respuestas se envían a través de Zernio.",
