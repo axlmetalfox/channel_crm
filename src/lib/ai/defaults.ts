@@ -97,6 +97,32 @@ export function aiReplyCapResetHours(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REPLY_CAP_RESET_HOURS
 }
 
+const DEFAULT_DAILY_REPLY_LIMIT = 40
+const DEFAULT_REPLY_DEBOUNCE_MS = 4000
+
+/**
+ * Most replies the agent sends one contact in any 24 hours, however many
+ * times the per-conversation budget resets. A backstop against a loop or
+ * someone running up the account's spend. Override with
+ * `AI_DAILY_REPLY_LIMIT`.
+ */
+export function aiDailyReplyLimit(): number {
+  const raw = Number(process.env.AI_DAILY_REPLY_LIMIT)
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_DAILY_REPLY_LIMIT
+}
+
+/**
+ * How long the agent waits after a customer message to see whether more
+ * arrive, so a burst gets one answer instead of one per line. 0 turns it
+ * off. Override with `AI_REPLY_DEBOUNCE_MS`.
+ */
+export function aiReplyDebounceMs(): number {
+  const raw = process.env.AI_REPLY_DEBOUNCE_MS
+  if (raw === undefined || raw.trim() === '') return DEFAULT_REPLY_DEBOUNCE_MS
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_REPLY_DEBOUNCE_MS
+}
+
 /** How many recent text messages to feed the model. Override with
  *  `AI_CONTEXT_MESSAGE_LIMIT`. */
 export function aiContextMessageLimit(): number {

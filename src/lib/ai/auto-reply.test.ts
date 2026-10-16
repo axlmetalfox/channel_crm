@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   generateReply: vi.fn(),
   engineSendText: vi.fn(),
   captureLead: vi.fn(),
+  hasNewer: vi.fn(),
+  repliesSince: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -25,6 +27,11 @@ vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('@/lib/leads/capture', () => ({ captureLead: h.captureLead }))
+vi.mock('./guards', () => ({
+  hasNewerCustomerText: h.hasNewer,
+  aiRepliesSince: h.repliesSince,
+  sleep: () => Promise.resolve(),
+}))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
@@ -95,6 +102,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     leadCaptureEnabled: false,
     nonTextReply: null,
     replyLimitReply: null,
+    autoReplySchedule: null,
     embeddingsApiKey: null,
     ...overrides,
   }
@@ -116,6 +124,8 @@ beforeEach(() => {
   h.retrieveKnowledge.mockResolvedValue([])
   h.generateReply.mockResolvedValue({ text: 'Hello!', handoff: false })
   h.engineSendText.mockResolvedValue({ whatsapp_message_id: 'm1' })
+  h.hasNewer.mockResolvedValue(false)
+  h.repliesSince.mockResolvedValue(0)
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
@@ -421,3 +431,67 @@ describe('dispatchNonTextAutoReply', () => {
   })
 })
 
+describe('dispatchInboundToAiReply — schedule, bursts and the daily limit', () => {
+  const SCHEDULE = {
+    timezone: 'America/Bogota',
+    windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '24:00' }],
+  }
+  const NEVER = {
+    timezone: 'America/Bogota',
+    // Only Sundays between 03:00 and 03:01 local time: effectively never.
+    windows: [{ days: [0], start: '03:00', end: '03:01' }],
+  }
+
+  it('answers inside the schedule', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplySchedule: SCHEDULE }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays silent outside the schedule (the message waits for a person)', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-14T17:00:00Z')) // a Wednesday noon in Bogotá
+    try {
+      h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplySchedule: NEVER }))
+      await dispatchInboundToAiReply(ARGS)
+      await dispatchNonTextAutoReply(ARGS)
+      expect(h.generateReply).not.toHaveBeenCalled()
+      expect(h.engineSendText).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('steps aside when the customer wrote again during the wait', async () => {
+    h.hasNewer.mockResolvedValue(true)
+    await dispatchInboundToAiReply({ ...ARGS, inboundMessageId: 'msg-1' })
+    expect(h.hasNewer).toHaveBeenCalledWith(expect.anything(), 'conv-1', 'msg-1')
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('answers the last line of a burst', async () => {
+    h.hasNewer.mockResolvedValue(false)
+    await dispatchInboundToAiReply({ ...ARGS, inboundMessageId: 'msg-2' })
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not wait when the dispatch carries no message id', async () => {
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.hasNewer).not.toHaveBeenCalled()
+  })
+
+  it('stops at the daily limit and tells the customer once', async () => {
+    h.repliesSince.mockResolvedValue(40)
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: fallbackText('replyLimit', null) }),
+    )
+
+    h.engineSendText.mockClear()
+    h.state.lastBot = { created_at: new Date().toISOString(), content_text: fallbackText('replyLimit', null) }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+})

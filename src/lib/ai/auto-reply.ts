@@ -3,7 +3,14 @@ import { loadAiConfig } from './config'
 import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
-import { aiReplyCapResetHours, buildSystemPrompt } from './defaults'
+import {
+  aiDailyReplyLimit,
+  aiReplyCapResetHours,
+  aiReplyDebounceMs,
+  buildSystemPrompt,
+} from './defaults'
+import { aiRepliesSince, hasNewerCustomerText, sleep } from './guards'
+import { isOnDuty } from './schedule'
 import { fallbackText } from './fallback'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
@@ -22,6 +29,10 @@ interface DispatchArgs {
   /** The account's WhatsApp config owner, used for the outbound send's
    *  audit columns (mirrors how the flow runner passes it through). */
   configOwnerUserId: string
+  /** The stored inbound message this dispatch answers. When given, a
+   *  customer who keeps writing gets one answer to the burst, not one
+   *  per line. */
+  inboundMessageId?: string
 }
 
 /**
@@ -53,6 +64,8 @@ export async function dispatchInboundToAiReply(
 
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
+    // Outside the agent's hours the message waits for a person.
+    if (!isOnDuty(config.autoReplySchedule)) return
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -72,6 +85,15 @@ export async function dispatchInboundToAiReply(
     if (convErr || !conv) return
     if (conv.assigned_agent_id) return // a human owns this thread
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
+
+    // A customer who writes several lines in a row gets one answer, to the
+    // last of them: wait a moment and step aside if a newer text arrived.
+    const debounceMs = aiReplyDebounceMs()
+    if (args.inboundMessageId && debounceMs > 0) {
+      await sleep(debounceMs)
+      if (await hasNewerCustomerText(db, conversationId, args.inboundMessageId)) return
+    }
+
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound). At the cap the
     // conversation either gets its budget back (the customer returned
@@ -87,6 +109,13 @@ export async function dispatchInboundToAiReply(
         configOwnerUserId,
       })
       if (!resumed) return
+    }
+
+    // Backstop per contact, however often the budget above resets.
+    const sinceDay = new Date(Date.now() - 24 * 3_600_000).toISOString()
+    if ((await aiRepliesSince(db, conversationId, sinceDay)) >= aiDailyReplyLimit()) {
+      await tellReplyLimitOnce({ db, config, accountId, conversationId, contactId, configOwnerUserId })
+      return
     }
 
     const messages = await buildConversationContext(db, conversationId)
@@ -295,7 +324,7 @@ async function resolveReplyCap(args: {
   contactId: string
   configOwnerUserId: string
 }): Promise<boolean> {
-  const { db, config, accountId, conversationId, contactId, configOwnerUserId } = args
+  const { db, conversationId } = args
   const last = await lastBotMessage(db, conversationId)
   const quietMs = last ? Date.now() - new Date(last.created_at).getTime() : Infinity
 
@@ -304,8 +333,24 @@ async function resolveReplyCap(args: {
     return true
   }
 
+  await tellReplyLimitOnce(args)
+  return false
+}
+
+/** Tell the customer the limit was reached, unless the last thing the bot
+ *  said already was exactly that. */
+async function tellReplyLimitOnce(args: {
+  db: ReturnType<typeof supabaseAdmin>
+  config: NonNullable<Awaited<ReturnType<typeof loadAiConfig>>>
+  accountId: string
+  conversationId: string
+  contactId: string
+  configOwnerUserId: string
+}): Promise<void> {
+  const { db, config, accountId, conversationId, contactId, configOwnerUserId } = args
   const text = fallbackText('replyLimit', config.replyLimitReply)
-  if (last?.content_text?.trim() === text) return false // already told them
+  const last = await lastBotMessage(db, conversationId)
+  if (last?.content_text?.trim() === text) return
   await engineSendText({
     accountId,
     userId: configOwnerUserId,
@@ -314,7 +359,6 @@ async function resolveReplyCap(args: {
     text,
     aiGenerated: true,
   })
-  return false
 }
 
 /**
@@ -330,6 +374,7 @@ export async function dispatchNonTextAutoReply(args: DispatchArgs): Promise<void
     const db = supabaseAdmin()
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
+    if (!isOnDuty(config.autoReplySchedule)) return
     if (await hasActiveAutoResponder(db, accountId)) return
 
     const { data: conv } = await db

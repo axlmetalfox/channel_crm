@@ -9,6 +9,7 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
 import { AiError, type AiProvider } from '@/lib/ai/types'
+import { parseSchedule, type AutoReplySchedule } from '@/lib/ai/schedule'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -30,7 +31,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, auto_reply_schedule, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -136,6 +137,16 @@ export async function POST(request: Request) {
     const nonTextReply = fixedReply(body.non_text_reply)
     const replyLimitReply = fixedReply(body.reply_limit_reply)
 
+    // Absent = unchanged; null = always on duty; an object = the weekly windows.
+    let schedule: AutoReplySchedule | null | undefined
+    if (body.auto_reply_schedule !== undefined) {
+      const parsed = parseSchedule(body.auto_reply_schedule)
+      if (typeof parsed === 'string') {
+        return NextResponse.json({ error: parsed }, { status: 400 })
+      }
+      schedule = parsed
+    }
+
     const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
 
     // Embeddings key (optional, for semantic KB search): a non-empty
@@ -192,6 +203,7 @@ export async function POST(request: Request) {
           leadCaptureEnabled,
           nonTextReply: null,
           replyLimitReply: null,
+          autoReplySchedule: null,
           embeddingsApiKey: null,
         })
       } catch (err) {
@@ -239,6 +251,7 @@ export async function POST(request: Request) {
     if (leadCaptureProvided) shared.lead_capture_enabled = leadCaptureEnabled
     if (nonTextReply !== undefined) shared.non_text_reply = nonTextReply
     if (replyLimitReply !== undefined) shared.reply_limit_reply = replyLimitReply
+    if (schedule !== undefined) shared.auto_reply_schedule = schedule
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)
     } else if (clearEmbeddingsKey) {

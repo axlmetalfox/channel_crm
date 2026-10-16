@@ -6,6 +6,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { isBlankTemplate } from './junk'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound, ZernioStatus } from './events'
 
@@ -220,6 +221,18 @@ export async function processZernioInbound(
 
   const inboundText = msg.text ?? ''
 
+  // The share-button text with its blanks left unfilled ("mi nombre es ___ y
+  // busco información sobre ___") says nothing about who is writing or what
+  // they need, and floods the inbox: close the thread without replying.
+  if (isBlankTemplate(inboundText)) {
+    await db
+      .from('conversations')
+      .update({ status: 'closed', updated_at: new Date().toISOString() })
+      .eq('id', conversation.id)
+    console.info('[zernio inbound] closed a conversation that opened with the blank template')
+    return
+  }
+
   const flowResult = await dispatchInboundToFlows({
     accountId: config.accountId,
     userId: config.userId,
@@ -248,6 +261,7 @@ export async function processZernioInbound(
       conversationId: conversation.id,
       contactId: contact.id,
       configOwnerUserId: config.userId,
+      inboundMessageId: (inserted[0] as { id: string }).id,
     }
     // Text goes to the agent; anything else (voice note, photo…) gets a
     // fixed "please write it" reply instead of silence.

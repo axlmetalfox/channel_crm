@@ -16,6 +16,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     leadCaptureEnabled: false,
     nonTextReply: null,
     replyLimitReply: null,
+    autoReplySchedule: null,
     embeddingsApiKey: null,
     ...overrides,
   }

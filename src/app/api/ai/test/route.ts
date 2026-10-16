@@ -76,6 +76,7 @@ export async function POST(request: Request) {
         leadCaptureEnabled: false,
         nonTextReply: null,
         replyLimitReply: null,
+      autoReplySchedule: null,
         embeddingsApiKey: null,
       })
     } catch (err) {

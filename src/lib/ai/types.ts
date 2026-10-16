@@ -6,6 +6,8 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
+import type { AutoReplySchedule } from './schedule'
+
 export type AiProvider = 'openai' | 'anthropic'
 
 /**
@@ -33,6 +35,8 @@ export interface AiConfig {
    *  wacrm then extracts the lead and sends it to the account's CRM via
    *  the `lead.captured` webhook. Needs the OpenAI-compatible provider. */
   leadCaptureEnabled: boolean
+  /** Weekly windows when the agent answers; null = always. */
+  autoReplySchedule: AutoReplySchedule | null
   /** Fixed reply to a non-text message; null = built-in default. */
   nonTextReply: string | null
   /** Fixed reply sent once at the reply cap; null = built-in default. */
