@@ -35,6 +35,9 @@ export interface AutoReplySchedule {
   windows: ScheduleWindow[]
   /** Local dates ("YYYY-MM-DD") when the agent covers the whole day. */
   holidays?: string[]
+  /** Name of an existing tag to put on a contact who writes while the
+   *  agent is off duty (and take off again once the agent answers). */
+  officeHoursTag?: string
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$|^24:00$/
@@ -67,6 +70,13 @@ export function parseSchedule(raw: unknown): AutoReplySchedule | null | string {
   }
   if (!Array.isArray(r.windows) || r.windows.length === 0 || r.windows.length > 20) {
     return 'schedule.windows must be a list of 1 to 20 windows'
+  }
+  let officeHoursTag: string | undefined
+  if (r.officeHoursTag !== undefined && r.officeHoursTag !== null) {
+    if (typeof r.officeHoursTag !== 'string' || !r.officeHoursTag.trim() || r.officeHoursTag.length > 60) {
+      return 'schedule.officeHoursTag must be a tag name of up to 60 characters'
+    }
+    officeHoursTag = r.officeHoursTag.trim()
   }
   let holidays: string[] | undefined
   if (r.holidays !== undefined && r.holidays !== null) {
@@ -102,7 +112,12 @@ export function parseSchedule(raw: unknown): AutoReplySchedule | null | string {
     if (typeof end !== 'string' || !TIME_RE.test(end)) return 'window.end must be HH:MM'
     windows.push({ days: [...new Set(days as number[])], start, end })
   }
-  return holidays ? { timezone: r.timezone, windows, holidays } : { timezone: r.timezone, windows }
+  return {
+    timezone: r.timezone,
+    windows,
+    ...(holidays ? { holidays } : {}),
+    ...(officeHoursTag ? { officeHoursTag } : {}),
+  }
 }
 
 /** Day of week (0-6), minutes since midnight and the date in `timezone`. */

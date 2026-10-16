@@ -227,8 +227,13 @@ async function processIntake(
   }
   // The lead now exists in the CRM: let the next message look the customer
   // up afresh (a first-time customer becomes a registered one).
+  // The request is in the CRM, so the conversation is done: close it. A
+  // new message from the customer re-opens it.
   if (row.conversation_id) {
-    await db.from('conversations').update({ crm_match: null }).eq('id', row.conversation_id)
+    await db
+      .from('conversations')
+      .update({ crm_match: null, status: 'closed', updated_at: new Date().toISOString() })
+      .eq('id', row.conversation_id)
   }
   return finish('delivered', { error: null, delivered_at: new Date().toISOString() })
 }

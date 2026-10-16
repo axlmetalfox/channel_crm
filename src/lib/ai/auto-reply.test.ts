@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   engineSendText: vi.fn(),
   captureLead: vi.fn(),
   hasNewer: vi.fn(),
+  setTag: vi.fn(),
   repliesSince: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
@@ -27,6 +28,7 @@ vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('@/lib/leads/capture', () => ({ captureLead: h.captureLead }))
+vi.mock('./tags', () => ({ setOfficeHoursTag: h.setTag }))
 vi.mock('./guards', () => ({
   hasNewerCustomerText: h.hasNewer,
   aiRepliesSince: h.repliesSince,
@@ -126,6 +128,7 @@ beforeEach(() => {
   h.engineSendText.mockResolvedValue({ whatsapp_message_id: 'm1' })
   h.hasNewer.mockResolvedValue(false)
   h.repliesSince.mockResolvedValue(0)
+  h.setTag.mockResolvedValue(undefined)
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
@@ -460,6 +463,39 @@ describe('dispatchInboundToAiReply — schedule, bursts and the daily limit', ()
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('tags a contact who writes off duty, and untags them once the agent answers', async () => {
+    const tagged = { ...NEVER, officeHoursTag: 'Horario_laboral' }
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-14T17:00:00Z'))
+    try {
+      h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplySchedule: tagged }))
+      await dispatchInboundToAiReply(ARGS)
+      expect(h.setTag).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ contactId: 'contact-1', tagName: 'Horario_laboral', on: true }),
+      )
+      expect(h.engineSendText).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+
+    h.loadAiConfig.mockResolvedValue(
+      aiConfig({ autoReplySchedule: { ...SCHEDULE, officeHoursTag: 'Horario_laboral' } }),
+    )
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.setTag).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tagName: 'Horario_laboral', on: false }),
+    )
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not touch tags when the schedule names none', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ autoReplySchedule: SCHEDULE }))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.setTag).not.toHaveBeenCalled()
   })
 
   it('steps aside when the customer wrote again during the wait', async () => {

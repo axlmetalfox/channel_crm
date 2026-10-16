@@ -20,9 +20,11 @@ export async function reopenClosedConversation(
   db: SupabaseClient,
   conversation: { id: string; status?: string | null },
 ): Promise<boolean> {
-  // Nothing to do for open/pending threads, which is the common case —
-  // skipping the round trip keeps inbound processing as cheap as it was.
-  if (conversation.status !== 'closed') return false
+  // Nothing to do for open threads, which is the common case — skipping
+  // the round trip keeps inbound processing as cheap as it was. A pending
+  // thread (waiting on the customer) is back in play once they write.
+  const status = conversation.status
+  if (status !== 'closed' && status !== 'pending') return false
 
   const { error } = await db
     .from('conversations')
@@ -30,9 +32,9 @@ export async function reopenClosedConversation(
     .eq('id', conversation.id)
     // Re-checked in SQL, not just in the `if` above: the caller's row was
     // read earlier in the request, so two concurrent inbound deliveries
-    // both holding a stale `status: 'closed'` must not be able to write
-    // 'open' back over an agent who re-closed the thread in between.
-    .eq('status', 'closed')
+    // both holding a stale status must not be able to write 'open' back
+    // over an agent who re-closed the thread in between.
+    .eq('status', status)
 
   if (error) {
     // Best-effort, same as the conversation update this follows: a failed

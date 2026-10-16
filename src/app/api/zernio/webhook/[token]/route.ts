@@ -60,6 +60,12 @@ export async function POST(
   const eventId = request.headers.get('x-zernio-event-id')
   console.info(`[zernio webhook] received ${eventName} (account ${config.accountId}, event ${eventId ?? 'n/a'})`)
 
+  // Field names and types only (never values) of an inbound message, to see
+  // which attribution data Zernio passes along for ad-originated chats.
+  if (eventName === 'message.received') {
+    console.info(`[zernio webhook] shape ${JSON.stringify(describeShape(payload))}`)
+  }
+
   // Zernio's "send test event" carries `test: true`: acknowledge it without
   // processing, so a test can never open a conversation or trigger an AI reply.
   if (

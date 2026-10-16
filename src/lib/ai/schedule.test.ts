@@ -96,6 +96,13 @@ describe('parseSchedule', () => {
     expect(parsed.holidays).toEqual(['2026-11-02', '2026-12-25'])
   })
 
+  it('keeps and validates the office-hours tag name', () => {
+    const base = { timezone: 'America/Bogota', windows: INTERTEC.windows }
+    expect((parseSchedule({ ...base, officeHoursTag: ' Horario_laboral ' }) as AutoReplySchedule).officeHoursTag).toBe('Horario_laboral')
+    expect(parseSchedule({ ...base, officeHoursTag: '' })).toMatch(/officeHoursTag/)
+    expect(parseSchedule({ ...base, officeHoursTag: 5 })).toMatch(/officeHoursTag/)
+  })
+
   it('rejects a malformed holiday list', () => {
     const base = { timezone: 'America/Bogota', windows: INTERTEC.windows }
     expect(parseSchedule({ ...base, holidays: ['02/11/2026'] })).toMatch(/holidays/)

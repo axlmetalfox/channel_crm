@@ -73,20 +73,27 @@ describe('reopenClosedConversation', () => {
     ])
   })
 
-  it.each(['open', 'pending'])(
-    'issues no query for a %s conversation',
-    async (status) => {
-      const { client, calls } = stubClient()
+  it('puts a pending conversation back to open when the customer writes', async () => {
+    const { client, calls } = stubClient()
 
-      const reopened = await reopenClosedConversation(client, {
-        id: 'conv-1',
-        status,
-      })
+    const reopened = await reopenClosedConversation(client, { id: 'conv-1', status: 'pending' })
 
-      expect(reopened).toBe(false)
-      expect(calls).toEqual([])
-    },
-  )
+    expect(reopened).toBe(true)
+    expect(calls[0].payload).toMatchObject({ status: 'open' })
+    expect(calls[0].filters).toEqual([
+      ['id', 'conv-1'],
+      ['status', 'pending'],
+    ])
+  })
+
+  it('issues no query for an open conversation', async () => {
+    const { client, calls } = stubClient()
+
+    const reopened = await reopenClosedConversation(client, { id: 'conv-1', status: 'open' })
+
+    expect(reopened).toBe(false)
+    expect(calls).toEqual([])
+  })
 
   it('issues no query when status is missing', async () => {
     const { client, calls } = stubClient()

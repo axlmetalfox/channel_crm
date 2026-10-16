@@ -11,6 +11,7 @@ import {
 } from './defaults'
 import { aiRepliesSince, hasNewerCustomerText, sleep } from './guards'
 import { isOnDuty } from './schedule'
+import { setOfficeHoursTag } from './tags'
 import { fallbackText } from './fallback'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
@@ -65,7 +66,7 @@ export async function dispatchInboundToAiReply(
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
     // Outside the agent's hours the message waits for a person.
-    if (!isOnDuty(config.autoReplySchedule)) return
+    if (!(await onDuty(db, config, accountId, contactId))) return
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -276,6 +277,30 @@ export async function dispatchInboundToAiReply(
   }
 }
 
+/**
+ * Whether the agent answers now. When the schedule names an office-hours
+ * tag, a contact who writes off duty gets it (so the people covering that
+ * time find them), and loses it again once the agent is back.
+ */
+async function onDuty(
+  db: ReturnType<typeof supabaseAdmin>,
+  config: NonNullable<Awaited<ReturnType<typeof loadAiConfig>>>,
+  accountId: string,
+  contactId: string,
+): Promise<boolean> {
+  const schedule = config.autoReplySchedule
+  const open = isOnDuty(schedule)
+  if (schedule?.officeHoursTag) {
+    await setOfficeHoursTag(db, {
+      accountId,
+      contactId,
+      tagName: schedule.officeHoursTag,
+      on: !open,
+    })
+  }
+  return open
+}
+
 /** True when the account has a message-level automation that already
  *  answers every inbound (the AI stands down so the customer is not
  *  texted twice). */
@@ -374,7 +399,7 @@ export async function dispatchNonTextAutoReply(args: DispatchArgs): Promise<void
     const db = supabaseAdmin()
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
-    if (!isOnDuty(config.autoReplySchedule)) return
+    if (!(await onDuty(db, config, accountId, contactId))) return
     if (await hasActiveAutoResponder(db, accountId)) return
 
     const { data: conv } = await db

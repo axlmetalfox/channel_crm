@@ -159,6 +159,21 @@ describe('captureLead', () => {
     expect(lastStatus()).toMatchObject({ status: 'delivered', error: null })
   })
 
+  it('closes the conversation once the lead is in the CRM', async () => {
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(
+      h.state.updates.some((u) => u.table === 'conversations' && u.values.status === 'closed'),
+    ).toBe(true)
+  })
+
+  it('leaves the conversation open when the lead was not delivered', async () => {
+    h.deliver.mockResolvedValue({ endpoints: 1, delivered: 0 })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(
+      h.state.updates.some((u) => u.table === 'conversations' && u.values.status === 'closed'),
+    ).toBe(false)
+  })
+
   it('gives the conversation a fresh reply budget', async () => {
     await captureLead({ db: fakeDb(), ...ARGS })
     expect(
