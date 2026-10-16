@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ export default function SignupPage() {
 
 function SignupPageInner() {
   const t = useTranslations("AuthPages");
+  const router = useRouter();
   const searchParams = useSearchParams();
   // When the user lands here from `/join/<token>` we carry the
   // invite token in the query so it survives the signup → email
@@ -62,6 +63,49 @@ function SignupPageInner() {
 
     setLoading(true);
 
+    // With an invitation link, the server creates the account (public
+    // sign-up may be closed on this instance): the link is the credential.
+    // Then we sign in and let /join/<token> accept the invitation.
+    if (inviteToken) {
+      try {
+        const res = await fetch(
+          `/api/invitations/${encodeURIComponent(inviteToken)}/signup`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ full_name: fullName, email, password }),
+          },
+        );
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { code?: string };
+          setError(
+            data.code === "email_exists"
+              ? t("signupEmailExists")
+              : data.code === "invalid_invite"
+                ? t("signupInviteInvalid")
+                : t("signupFailed"),
+          );
+          setLoading(false);
+          return;
+        }
+      } catch {
+        setError(t("signupFailed"));
+        setLoading(false);
+        return;
+      }
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) {
+        // The account exists; just send them to sign in.
+        router.push(`/login?invite=${encodeURIComponent(inviteToken)}`);
+        return;
+      }
+      router.push(`/join/${encodeURIComponent(inviteToken)}`);
+      return;
+    }
+
     // If we have an invite token, point Supabase's verification
     // email back at the join page so the user can accept after
     // verifying. Without a token, Supabase uses its default
@@ -82,7 +126,7 @@ function SignupPageInner() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(/signups? not allowed/i.test(error.message) ? t("signupClosed") : error.message);
       setLoading(false);
       return;
     }
