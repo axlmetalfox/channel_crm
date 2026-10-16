@@ -89,6 +89,35 @@ describe('parseZernioEvent', () => {
     expect(ev).toMatchObject({ kind: 'message', phone: null, username: 'ana.g', name: 'Ana' })
   })
 
+  it('reads the ad referral Zernio passes in metadata.referral', () => {
+    const ev = parseZernioEvent({
+      ...received,
+      metadata: {
+        referral: {
+          source_url: 'https://fb.me/abc',
+          source_id: '120210000000001',
+          source_type: 'ad',
+          headline: 'Más precisión',
+          body: 'texto',
+          media_type: 'video',
+          video_url: 'https://x/v.mp4',
+          ctwa_clid: 'AfX123',
+          welcome_message: { text: 'hola' },
+        },
+      },
+    })
+    expect(ev).toMatchObject({
+      referral: {
+        sourceType: 'ad',
+        sourceId: '120210000000001',
+        sourceUrl: 'https://fb.me/abc',
+        headline: 'Más precisión',
+        ctwaClid: 'AfX123',
+      },
+    })
+    expect(parseZernioEvent(received)).toMatchObject({ referral: null })
+  })
+
   it('falls back to a numeric sender id when phoneNumber is absent', () => {
     const ev = parseZernioEvent({
       ...received,

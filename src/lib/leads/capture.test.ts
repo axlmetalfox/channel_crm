@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
     insertError: null as { code: string } | null,
     claimOk: true,
     crmMatch: null as Record<string, unknown> | null,
+    attribution: null as Record<string, unknown> | null,
     retryRows: [] as Record<string, unknown>[],
     updates: [] as { table: string; values: Record<string, unknown> }[],
     messages: [
@@ -62,7 +63,7 @@ function fakeDb() {
           return { data: null, error: null }
         }
         if (table === 'messages') return { data: [...h.state.messages].reverse(), error: null }
-        if (table === 'conversations') return { data: { crm_match: h.state.crmMatch }, error: null }
+        if (table === 'conversations') return { data: { crm_match: h.state.crmMatch, attribution: h.state.attribution }, error: null }
         if (table === 'contacts') return { data: { phone: '573112580000' }, error: null }
         if (table === 'lead_intakes') return { data: h.state.retryRows, error: null }
         return { data: null, error: null }
@@ -126,6 +127,7 @@ beforeEach(() => {
   h.state.insertError = null
   h.state.claimOk = true
   h.state.crmMatch = null
+  h.state.attribution = null
   h.state.retryRows = []
   h.state.updates = []
   h.extractLead.mockResolvedValue({ lead: LEAD, usage: null })
@@ -231,6 +233,29 @@ describe('captureLead', () => {
     expect(
       h.state.updates.some((u) => u.table === 'conversations' && u.values.crm_match === null),
     ).toBe(true)
+  })
+
+  it('carries the ad the chat came from in the payload', async () => {
+    h.state.attribution = {
+      source_type: 'ad',
+      source_id: '120210000000001',
+      source_url: 'https://fb.me/abc',
+      headline: 'Más precisión',
+      body: null,
+      media_type: 'video',
+      ctwa_clid: 'AfX123',
+      captured_at: '2026-10-16T04:00:00.000Z',
+    }
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.deliver.mock.calls[0][3].attribution).toMatchObject({
+      source_id: '120210000000001',
+      ctwa_clid: 'AfX123',
+    })
+  })
+
+  it('sends attribution as null for an organic chat', async () => {
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.deliver.mock.calls[0][3].attribution).toBeNull()
   })
 
   it('sends existing_record as null for a customer the CRM does not know', async () => {

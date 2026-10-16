@@ -31,6 +31,18 @@ const PAYLOAD_TRANSCRIPT_CHARS = 8000
 
 const RETRYABLE_STATUSES = ['pending', 'failed', 'no_endpoint']
 
+/** Click-to-WhatsApp source saved on the conversation (see migration 048). */
+export interface Attribution {
+  source_type: string | null
+  source_id: string | null
+  source_url: string | null
+  headline: string | null
+  body: string | null
+  media_type: string | null
+  ctwa_clid: string | null
+  captured_at: string
+}
+
 export interface IntakeRow {
   id: string
   account_id: string
@@ -54,6 +66,8 @@ export interface LeadPayload {
   consent: { given: true; captured_at: string }
   /** Set when the customer was already registered in the CRM. */
   existing_record: { module: string; id: string } | null
+  /** The ad or post the customer's chat started from, when it did. */
+  attribution: Attribution | null
   transcript: { role: 'customer' | 'assistant'; text: string }[]
 }
 
@@ -283,10 +297,11 @@ async function buildPayload(
   // complete the lead from the CRM record.
   const { data: convRow } = await db
     .from('conversations')
-    .select('crm_match')
+    .select('crm_match, attribution')
     .eq('id', row.conversation_id)
     .maybeSingle()
   const crm = (convRow?.crm_match as CrmMatch | null | undefined) ?? null
+  const attribution = (convRow?.attribution as Attribution | null | undefined) ?? null
 
   const { data: contact } = row.contact_id
     ? await db.from('contacts').select('phone').eq('id', row.contact_id).maybeSingle()
@@ -335,6 +350,7 @@ async function buildPayload(
     consent: { given: true, captured_at: row.created_at },
     existing_record:
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
+    attribution,
     transcript: trimTranscript(transcript),
   }
   return { payload }

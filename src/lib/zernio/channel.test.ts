@@ -169,6 +169,7 @@ const INBOUND: ZernioInbound = {
   contentType: 'text',
   mediaUrl: null,
   sentAt: '2026-10-13T20:00:00Z',
+  referral: null,
 }
 
 describe('processZernioInbound', () => {
@@ -207,6 +208,34 @@ describe('processZernioInbound', () => {
     expect(contactInsert.values).toMatchObject({ phone: '', name: '@ana.g' })
     expect(h.findExistingContact).not.toHaveBeenCalled()
     expect(h.dispatchAi).toHaveBeenCalled()
+  })
+
+  it('saves the ad a chat came from', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      referral: {
+        sourceType: 'ad',
+        sourceId: '120210000000001',
+        sourceUrl: 'https://fb.me/abc',
+        headline: 'Más precisión',
+        body: 'La ventaja de tu competencia',
+        mediaType: 'video',
+        ctwaClid: 'AfX123',
+      },
+    })
+    const saved = written('conversations', 'update').find((o) => o.values?.attribution)
+    expect(saved?.values?.attribution).toMatchObject({
+      source_type: 'ad',
+      source_id: '120210000000001',
+      source_url: 'https://fb.me/abc',
+      headline: 'Más precisión',
+      ctwa_clid: 'AfX123',
+    })
+  })
+
+  it('does not touch attribution for an organic message', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, INBOUND)
+    expect(written('conversations', 'update').some((o) => o.values && 'attribution' in o.values)).toBe(false)
   })
 
   it('remembers the Zernio conversation id when it changed', async () => {

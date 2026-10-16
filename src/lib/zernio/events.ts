@@ -11,6 +11,21 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 const str = (v: unknown): string | null =>
   typeof v === 'string' && v.trim() ? v.trim() : null
 
+/** Where a chat came from when it started from a click-to-WhatsApp ad or
+ *  post (Meta's `referral`, passed on by Zernio in `metadata.referral`). */
+export interface ZernioReferral {
+  /** "ad" or "post". */
+  sourceType: string | null
+  /** The ad's (or post's) id. */
+  sourceId: string | null
+  sourceUrl: string | null
+  headline: string | null
+  body: string | null
+  mediaType: string | null
+  /** Meta's click id; needed to report a conversion back to the ad. */
+  ctwaClid: string | null
+}
+
 export interface ZernioInbound {
   kind: 'message'
   /** Stable event id (also the X-Zernio-Event-Id header). */
@@ -32,6 +47,8 @@ export interface ZernioInbound {
   contentType: 'text' | 'image' | 'document' | 'audio' | 'video'
   mediaUrl: string | null
   sentAt: string | null
+  /** Set on the first message after an ad click, else null. */
+  referral: ZernioReferral | null
 }
 
 export interface ZernioStatus {
@@ -98,6 +115,20 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
         ? (attType as ZernioInbound['contentType'])
         : 'text'
 
+    const metadata = isObj(payload.metadata) ? payload.metadata : null
+    const ref = isObj(metadata?.referral) ? metadata.referral : null
+    const referral: ZernioReferral | null = ref
+      ? {
+          sourceType: str(ref.source_type),
+          sourceId: str(ref.source_id),
+          sourceUrl: str(ref.source_url),
+          headline: str(ref.headline),
+          body: str(ref.body),
+          mediaType: str(ref.media_type),
+          ctwaClid: str(ref.ctwa_clid),
+        }
+      : null
+
     return {
       kind: 'message',
       eventId,
@@ -111,6 +142,7 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
       contentType,
       mediaUrl: contentType === 'text' ? null : str(attachment?.url),
       sentAt: str(message.sentAt),
+      referral,
     }
   }
 

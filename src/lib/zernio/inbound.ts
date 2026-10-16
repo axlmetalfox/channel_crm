@@ -210,6 +210,28 @@ export async function processZernioInbound(
   }
   if (!inserted || inserted.length === 0) return // replay
 
+  // First message after an ad click: remember which ad it was. A later
+  // click on another ad replaces it (the newest source is the one a new
+  // request came from).
+  if (msg.referral && (msg.referral.sourceId || msg.referral.ctwaClid || msg.referral.sourceUrl)) {
+    const { error: attrError } = await db
+      .from('conversations')
+      .update({
+        attribution: {
+          source_type: msg.referral.sourceType,
+          source_id: msg.referral.sourceId,
+          source_url: msg.referral.sourceUrl,
+          headline: msg.referral.headline,
+          body: msg.referral.body?.slice(0, 500) ?? null,
+          media_type: msg.referral.mediaType,
+          ctwa_clid: msg.referral.ctwaClid,
+          captured_at: new Date().toISOString(),
+        },
+      })
+      .eq('id', conversation.id)
+    if (attrError) console.error('[zernio inbound] attribution save failed:', attrError)
+  }
+
   const { error: bumpError } = await db.rpc('bump_conversation_on_inbound', {
     p_conversation_id: conversation.id,
     p_last_message_text: msg.text || `[${msg.contentType}]`,
