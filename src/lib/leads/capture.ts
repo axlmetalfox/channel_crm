@@ -6,6 +6,7 @@ import { deliverWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractLead } from './extract'
 import { judgeLead, type Lead } from './schema'
 import { fillLeadFromRecord, type CrmMatch } from './lookup'
+import { reportLeadConversion } from './conversion'
 
 // ============================================================
 // Lead capture: turn a finished AI interview into a `lead.captured`
@@ -249,7 +250,19 @@ async function processIntake(
       .update({ crm_match: null, status: 'closed', updated_at: new Date().toISOString() })
       .eq('id', row.conversation_id)
   }
-  return finish('delivered', { error: null, delivered_at: new Date().toISOString() })
+  const status = await finish('delivered', { error: null, delivered_at: new Date().toISOString() })
+
+  // A lead that came from a Meta ad is reported back to Meta, so the ad
+  // learns which clicks become real leads. Recorded on the intake; it can
+  // never undo the delivery above.
+  const conversion = await reportLeadConversion(
+    db,
+    row,
+    { email: payload.lead.email },
+    payload.attribution ?? null,
+  )
+  await db.from('lead_intakes').update({ conversion }).eq('id', row.id)
+  return status
 }
 
 type Built =

@@ -150,6 +150,90 @@ export async function checkZernioAccount(
   }
 }
 
+/** The WABA's Meta conversions dataset id, or null when not set up yet. */
+export async function getWhatsAppDataset(args: {
+  apiKey: string
+  accountId: string
+}): Promise<{ datasetId: string | null }> {
+  const res = await zernioRequest<Record<string, unknown>>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/whatsapp/dataset?accountId=${encodeURIComponent(args.accountId)}`,
+  })
+  return { datasetId: typeof res.datasetId === 'string' ? res.datasetId : null }
+}
+
+/** Create (or find) the WABA's Meta conversions dataset. Idempotent. */
+export async function provisionWhatsAppDataset(args: {
+  apiKey: string
+  accountId: string
+}): Promise<{ datasetId: string | null; created: boolean }> {
+  const res = await zernioRequest<Record<string, unknown>>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: '/whatsapp/dataset',
+    body: { accountId: args.accountId },
+  })
+  return {
+    datasetId: typeof res.datasetId === 'string' ? res.datasetId : null,
+    created: res.created === true,
+  }
+}
+
+export interface WhatsAppConversionResult {
+  eventsReceived: number
+  eventsFailed: number
+  failures: { eventId: string | null; message: string }[]
+  traceId: string | null
+}
+
+/**
+ * Report a conversion for a chat that started from a click-to-WhatsApp
+ * ad. The 200 only means the request reached Meta: the counts say whether
+ * Meta took the event.
+ */
+export async function sendWhatsAppConversion(args: {
+  apiKey: string
+  accountId: string
+  conversationId: string
+  eventName: 'LeadSubmitted'
+  /** Stable dedup key. */
+  eventId: string
+  /** Unix seconds. */
+  eventTime?: number
+  email?: string | null
+  /** Meta's test_event_code: routes the event to Test Events. */
+  testCode?: string
+}): Promise<WhatsAppConversionResult> {
+  const res = await zernioRequest<Record<string, unknown>>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: '/whatsapp/conversions',
+    body: {
+      accountId: args.accountId,
+      conversationId: args.conversationId,
+      eventName: args.eventName,
+      eventId: args.eventId,
+      ...(args.eventTime ? { eventTime: args.eventTime } : {}),
+      ...(args.email ? { email: args.email } : {}),
+      ...(args.testCode ? { testCode: args.testCode } : {}),
+    },
+  })
+  const failures = Array.isArray(res.failures) ? res.failures : []
+  return {
+    eventsReceived: typeof res.eventsReceived === 'number' ? res.eventsReceived : 0,
+    eventsFailed: typeof res.eventsFailed === 'number' ? res.eventsFailed : 0,
+    failures: failures.map((f) => {
+      const o = (f ?? {}) as Record<string, unknown>
+      return {
+        eventId: typeof o.eventId === 'string' ? o.eventId : null,
+        message: typeof o.message === 'string' ? o.message : 'rejected',
+      }
+    }),
+    traceId: typeof res.traceId === 'string' ? res.traceId : null,
+  }
+}
+
 /** Events wacrm consumes from Zernio's inbox. */
 export const ZERNIO_WEBHOOK_EVENTS = [
   'message.received',

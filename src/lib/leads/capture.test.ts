@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   deliver: vi.fn(),
   logAiUsage: vi.fn(),
   loadAiConfig: vi.fn(),
+  reportConversion: vi.fn(),
   state: {
     insertError: null as { code: string } | null,
     claimOk: true,
@@ -26,6 +27,7 @@ vi.mock('./extract', () => ({ extractLead: h.extractLead }))
 vi.mock('@/lib/webhooks/deliver', () => ({ deliverWebhookEvent: h.deliver }))
 vi.mock('@/lib/ai/usage', () => ({ logAiUsage: h.logAiUsage }))
 vi.mock('@/lib/ai/config', () => ({ loadAiConfig: h.loadAiConfig }))
+vi.mock('./conversion', () => ({ reportLeadConversion: h.reportConversion }))
 
 import { captureLead, retryLeadIntakes } from './capture'
 
@@ -132,6 +134,7 @@ beforeEach(() => {
   h.state.updates = []
   h.extractLead.mockResolvedValue({ lead: LEAD, usage: null })
   h.deliver.mockResolvedValue({ endpoints: 1, delivered: 1 })
+  h.reportConversion.mockResolvedValue({ status: 'sent', at: '2026-10-16T05:00:00.000Z' })
 })
 
 describe('captureLead', () => {
@@ -251,6 +254,34 @@ describe('captureLead', () => {
       source_id: '120210000000001',
       ctwa_clid: 'AfX123',
     })
+  })
+
+  it('reports a delivered lead to Meta and records the outcome on the intake', async () => {
+    h.state.attribution = {
+      source_type: 'ad',
+      source_id: '1',
+      source_url: null,
+      headline: null,
+      body: null,
+      media_type: null,
+      ctwa_clid: 'AfX123',
+      captured_at: '2026-10-16T04:00:00.000Z',
+    }
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.reportConversion).toHaveBeenCalledTimes(1)
+    const [, intake, lead, attribution] = h.reportConversion.mock.calls[0]
+    expect(intake.id).toBe('intake-1')
+    expect(lead.email).toBe('juan@x.co')
+    expect(attribution.ctwa_clid).toBe('AfX123')
+    expect(
+      h.state.updates.some((u) => u.table === 'lead_intakes' && u.values.conversion),
+    ).toBe(true)
+  })
+
+  it('does not report to Meta a lead that was not delivered', async () => {
+    h.deliver.mockResolvedValue({ endpoints: 1, delivered: 0 })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.reportConversion).not.toHaveBeenCalled()
   })
 
   it('sends attribution as null for an organic chat', async () => {
