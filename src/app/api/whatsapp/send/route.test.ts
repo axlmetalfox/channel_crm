@@ -128,6 +128,7 @@ function makeSupabaseMock() {
 
 let supabaseMock = makeSupabaseMock()
 
+vi.mock('@/lib/zernio/config', () => ({ loadZernioConfig: async () => null })) // these tests cover the Meta path
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(async () => supabaseMock),
 }))

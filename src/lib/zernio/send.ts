@@ -22,7 +22,7 @@ export async function sendTextViaZernio(args: {
   aiGenerated?: boolean
   /** Dedupe key so a retried send is not delivered twice. */
   idempotencyKey?: string
-}): Promise<{ whatsapp_message_id: string }> {
+}): Promise<{ whatsapp_message_id: string; message_id: string }> {
   const { db, config, conversationId, text } = args
 
   const { data: conv, error } = await db
@@ -46,7 +46,9 @@ export async function sendTextViaZernio(args: {
     idempotencyKey: args.idempotencyKey,
   })
 
-  const { error: msgErr } = await db.from('messages').insert({
+  const { data: row, error: msgErr } = await db
+    .from('messages')
+    .insert({
     conversation_id: conversationId,
     sender_type: args.senderType ?? 'bot',
     content_type: 'text',
@@ -54,9 +56,11 @@ export async function sendTextViaZernio(args: {
     message_id: messageId,
     status: 'sent',
     ai_generated: args.aiGenerated ?? false,
-  })
-  if (msgErr) {
-    throw new Error(`sent through Zernio but DB insert failed: ${msgErr.message}`)
+    })
+    .select('id')
+    .single()
+  if (msgErr || !row) {
+    throw new Error(`sent through Zernio but DB insert failed: ${msgErr?.message ?? 'no row'}`)
   }
 
   const now = new Date().toISOString()
@@ -65,5 +69,5 @@ export async function sendTextViaZernio(args: {
     .update({ last_message_text: text, last_message_at: now, updated_at: now })
     .eq('id', conversationId)
 
-  return { whatsapp_message_id: messageId }
+  return { whatsapp_message_id: messageId, message_id: (row as { id: string }).id }
 }

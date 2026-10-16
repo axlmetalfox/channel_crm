@@ -66,6 +66,7 @@ function fakeDb() {
         if (op === 'insert') {
           if (table === 'contacts') return { data: { id: 'ct-1', name: null }, error: null }
           if (table === 'conversations') return { data: { id: 'cv-1' }, error: null }
+          if (table === 'messages') return { data: { id: 'm-db' }, error: null }
           return { data: null, error: null }
         }
         if (op === 'select') {
@@ -134,7 +135,7 @@ describe('sendTextViaZernio', () => {
       text: 'Hola',
       aiGenerated: true,
     })
-    expect(out).toEqual({ whatsapp_message_id: 'zmsg-1' })
+    expect(out).toEqual({ whatsapp_message_id: 'zmsg-1', message_id: 'm-db' })
     expect(h.sendZernioText).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: 'zacc', conversationId: 'zconv-1', text: 'Hola' }),
     )

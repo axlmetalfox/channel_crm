@@ -36,6 +36,9 @@ import {
 } from '@/lib/whatsapp/interactive';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
+import { loadZernioConfig } from '@/lib/zernio/config';
+import { sendTextViaZernio } from '@/lib/zernio/send';
+import { ZernioError } from '@/lib/zernio/client';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -234,6 +237,45 @@ export async function sendMessageToConversation(
   }
 
   const contact = conversation.contact;
+
+  // Accounts connected through Zernio send through it: it addresses the
+  // customer's existing Zernio conversation, so it works for customers
+  // whose number WhatsApp hides, and needs no Meta credentials. Text only
+  // for now.
+  const zernio = await loadZernioConfig(supabaseAdmin(), accountId);
+  if (zernio) {
+    if (messageType !== 'text') {
+      throw new SendMessageError(
+        'bad_request',
+        'This account sends through Zernio, which supports only text messages from the inbox for now.',
+        400
+      );
+    }
+    try {
+      const sent = await sendTextViaZernio({
+        db: supabaseAdmin(),
+        config: zernio,
+        conversationId,
+        text: contentText as string,
+        senderType: 'agent',
+      });
+      await pauseFlowsForAgentReply(accountId, contact?.id);
+      return { messageId: sent.message_id, whatsappMessageId: sent.whatsapp_message_id };
+    } catch (err) {
+      if (err instanceof SendMessageError) throw err;
+      if (err instanceof ZernioError) {
+        // 24h window closed, bad credentials, etc.: say so plainly.
+        throw new SendMessageError('send_failed', err.message, err.status >= 400 && err.status < 500 ? 400 : 502);
+      }
+      const message = err instanceof Error ? err.message : 'Send failed';
+      throw new SendMessageError(
+        /no Zernio thread/.test(message) ? 'bad_request' : 'send_failed',
+        message,
+        /no Zernio thread/.test(message) ? 400 : 502
+      );
+    }
+  }
+
   if (!contact?.phone) {
     throw new SendMessageError(
       'bad_request',
@@ -509,8 +551,20 @@ export async function sendMessageToConversation(
     })
     .eq('id', conversationId);
 
-  // Pause any active Flow run for this contact — the agent stepping in
-  // is the strongest "yield, human is here" signal. Best-effort.
+  await pauseFlowsForAgentReply(accountId, contact.id);
+
+  return { messageId: messageRecord.id, whatsappMessageId: waMessageId };
+}
+
+/**
+ * Pause any active Flow run for this contact — the agent stepping in is
+ * the strongest "yield, human is here" signal. Best-effort.
+ */
+async function pauseFlowsForAgentReply(
+  accountId: string,
+  contactId: string | undefined
+): Promise<void> {
+  if (!contactId) return;
   try {
     const { error: pauseErr } = await supabaseAdmin()
       .from('flow_runs')
@@ -520,7 +574,7 @@ export async function sendMessageToConversation(
         end_reason: 'agent_replied',
       })
       .eq('account_id', accountId)
-      .eq('contact_id', contact.id)
+      .eq('contact_id', contactId)
       .eq('status', 'active');
     if (pauseErr) {
       console.error('[flows] pause-on-agent-send failed:', pauseErr.message);
@@ -531,6 +585,4 @@ export async function sendMessageToConversation(
       err instanceof Error ? err.message : err
     );
   }
-
-  return { messageId: messageRecord.id, whatsappMessageId: waMessageId };
 }
