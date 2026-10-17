@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
     existingConversation: true,
     inserted: true,
     priorCustomerMessages: 0,
+    priorOutbound: 0,
     statusRow: null as { id: string; status: string } | null,
     ops: [] as { table: string; op: string; values?: Record<string, unknown> }[],
   },
@@ -58,6 +59,7 @@ function fakeDb() {
       let op = 'select'
       let values: Record<string, unknown> | undefined
       let head = false
+      let outbound = false
       const resolve = () => {
         h.state.ops.push({ table, op, values })
         if (op === 'upsert') {
@@ -71,7 +73,7 @@ function fakeDb() {
         }
         if (op === 'select') {
           if (table === 'messages' && head) {
-            return { data: null, count: h.state.priorCustomerMessages, error: null }
+            return { data: null, count: outbound ? h.state.priorOutbound : h.state.priorCustomerMessages, error: null }
           }
           if (table === 'messages') {
             return { data: h.state.statusRow ? [h.state.statusRow] : [], error: null }
@@ -85,7 +87,11 @@ function fakeDb() {
         return { data: null, error: null }
       }
       const b: Record<string, unknown> = {}
-      for (const m of ['eq', 'in', 'order', 'limit']) b[m] = () => b
+      for (const m of ['eq', 'order', 'limit']) b[m] = () => b
+      b.in = (col: string) => {
+        if (col === 'sender_type') outbound = true
+        return b
+      }
       b.select = (_cols?: string, opts?: { head?: boolean }) => {
         head = !!opts?.head
         return b
@@ -116,6 +122,7 @@ beforeEach(() => {
   h.state.existingConversation = true
   h.state.inserted = true
   h.state.priorCustomerMessages = 0
+  h.state.priorOutbound = 0
   h.state.statusRow = null
   h.state.ops = []
   h.sendZernioText.mockResolvedValue({ messageId: 'zmsg-1' })
@@ -237,6 +244,50 @@ describe('processZernioInbound', () => {
   it('does not touch attribution for an organic message', async () => {
     await processZernioInbound(fakeDb(), CONFIG, INBOUND)
     expect(written('conversations', 'update').some((o) => o.values && 'attribution' in o.values)).toBe(false)
+  })
+
+  it('stays silent when the first thing a person sends is only somebody else\'s shared reel', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      text: 'https://www.facebook.com/share/r/1GwhWZ8toN/',
+    })
+    expect(h.dispatchAi).not.toHaveBeenCalled()
+    expect(h.dispatchNonText).not.toHaveBeenCalled()
+    // The message itself is still stored for the team to see.
+    expect(written('messages', 'upsert')).toHaveLength(1)
+  })
+
+  it('still answers a shared link inside a conversation we are already in', async () => {
+    h.state.priorOutbound = 2
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      text: 'https://www.facebook.com/share/r/1GwhWZ8toN/',
+    })
+    expect(h.dispatchAi).toHaveBeenCalled()
+  })
+
+  it('still answers a shared link that comes from one of our ads, or has text with it', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      text: 'https://www.facebook.com/share/r/1GwhWZ8toN/',
+      referral: {
+        sourceType: 'ad',
+        sourceId: '1',
+        sourceUrl: 'https://fb.me/x',
+        headline: null,
+        body: null,
+        mediaType: null,
+        ctwaClid: 'c',
+      },
+    })
+    expect(h.dispatchAi).toHaveBeenCalledTimes(1)
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      eventId: 'evt-2',
+      messageId: 'zmsg-in-2',
+      text: 'Quiero esta máquina https://www.facebook.com/share/r/1GwhWZ8toN/',
+    })
+    expect(h.dispatchAi).toHaveBeenCalledTimes(2)
   })
 
   it('remembers the Zernio conversation id when it changed', async () => {

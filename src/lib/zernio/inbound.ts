@@ -5,6 +5,7 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from '@/lib/ai/auto-reply'
+import { isSocialShareOnly } from '@/lib/ai/social-links'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound, ZernioStatus } from './events'
@@ -143,6 +144,16 @@ async function findOrCreateConversation(
   return { conversation: data as Row, created: true }
 }
 
+/** Whether we (the agent, a flow or a person) have said anything in this conversation yet. */
+async function botHasSpoken(db: SupabaseClient, conversationId: string): Promise<boolean> {
+  const { count } = await db
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', conversationId)
+    .in('sender_type', ['bot', 'agent'])
+  return (count ?? 0) > 0
+}
+
 /** Process one customer message that arrived through Zernio. */
 export async function processZernioInbound(
   db: SupabaseClient,
@@ -272,10 +283,19 @@ export async function processZernioInbound(
       configOwnerUserId: config.userId,
       inboundMessageId: (inserted[0] as { id: string }).id,
     }
-    // Text goes to the agent; anything else (voice note, photo…) gets a
-    // fixed "please write it" reply instead of silence.
-    if (inboundText.trim()) await dispatchInboundToAiReply(aiArgs)
-    else await dispatchNonTextAutoReply(aiArgs)
+    // A first message that is only somebody else's shared reel or post
+    // (no ad behind it) says nothing to us: the agent stays silent, and the
+    // message waits in the inbox. If the person writes something real
+    // afterwards, the conversation starts normally.
+    if (msg.referral === null && isSocialShareOnly(inboundText) && !(await botHasSpoken(db, conversation.id))) {
+      console.info('[zernio inbound] first message is only a shared social link: no reply')
+    } else if (inboundText.trim()) {
+      // Text goes to the agent; anything else (voice note, photo…) gets a
+      // fixed "please write it" reply instead of silence.
+      await dispatchInboundToAiReply(aiArgs)
+    } else {
+      await dispatchNonTextAutoReply(aiArgs)
+    }
   }
 
   await dispatchWebhookEvent(db, config.accountId, 'message.received', {
