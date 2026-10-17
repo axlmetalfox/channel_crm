@@ -144,6 +144,26 @@ function localClock(
   }
 }
 
+/**
+ * When the current off-duty period began: the moment the agent last went
+ * off duty, i.e. when the people's working hours started. Null when the
+ * agent is on duty now, there is no schedule, or the period began further
+ * back than the lookback (a schedule that is practically always off).
+ */
+export function offDutySince(
+  schedule: AutoReplySchedule | null,
+  at: Date = new Date(),
+  lookbackHours = 24 * 8,
+): Date | null {
+  if (!schedule || isOnDuty(schedule, at)) return null
+  const step = 60_000
+  const limit = at.getTime() - lookbackHours * 3_600_000
+  for (let t = at.getTime() - step; t >= limit; t -= step) {
+    if (isOnDuty(schedule, new Date(t))) return new Date(t + step)
+  }
+  return null
+}
+
 /** Whether the agent should answer at `at`. No schedule = always. */
 export function isOnDuty(schedule: AutoReplySchedule | null, at: Date = new Date()): boolean {
   if (!schedule) return true

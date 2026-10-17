@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { isOnDuty, parseSchedule } from '@/lib/ai/schedule'
+import { isOnDuty, offDutySince, parseSchedule } from '@/lib/ai/schedule'
 
 // ============================================================
 // Hand stalled conversations to a person, round robin.
@@ -9,16 +9,20 @@ import { isOnDuty, parseSchedule } from '@/lib/ai/schedule'
 // the bridge between the AI agent (which opens and interviews) and the
 // human team (which follows up what the AI could not finish).
 //
-// Two guards keep it sensible:
+// Guards that keep it sensible:
 //   - nothing is assigned while the AI agent is on duty (per the
 //     account's schedule): that is when nobody is at the desks;
+//   - the inactivity clock starts when the working hours start, so the team
+//     gets the wait too instead of receiving the whole night's backlog at
+//     the opening bell;
+//   - conversations are handed out gradually (a few per agent per sweep),
+//     most recent first, and not at all once they are older than a limit;
+//   - agents marked unavailable are skipped;
 //   - only conversations still open or pending and with no owner qualify
 //     (a delivered lead closes its conversation).
 // Assigning a conversation silences the AI agent on it: a person owns it.
 // ============================================================
 
-/** Most conversations handed out per account per run. */
-const MAX_PER_RUN = 200
 
 /**
  * The agents to give `count` conversations to, in turn, continuing after
@@ -35,6 +39,8 @@ interface AccountRule {
   id: string
   auto_assign_after_minutes: number
   auto_assign_cursor: string | null
+  auto_assign_max_age_days: number
+  auto_assign_batch_per_agent: number
 }
 
 /**
@@ -49,7 +55,9 @@ export async function runAutoAssign(
   try {
     const { data: accounts } = await db
       .from('accounts')
-      .select('id, auto_assign_after_minutes, auto_assign_cursor')
+      .select(
+        'id, auto_assign_after_minutes, auto_assign_cursor, auto_assign_max_age_days, auto_assign_batch_per_agent',
+      )
       .eq('auto_assign_enabled', true)
 
     for (const account of (accounts ?? []) as AccountRule[]) {
@@ -77,18 +85,26 @@ async function assignForAccount(
     .eq('account_id', account.id)
     .maybeSingle()
   const schedule = parseSchedule(ai?.auto_reply_schedule)
-  if (schedule && typeof schedule !== 'string' && isOnDuty(schedule, now)) return 0
+  const hours = schedule && typeof schedule !== 'string' ? schedule : null
+  if (hours && isOnDuty(hours, now)) return 0
+
+  // The wait counts from the moment the team started working, not from the
+  // middle of the night: right at the opening nothing is due yet.
+  const opened = offDutySince(hours, now)
+  if (opened && now.getTime() - opened.getTime() < account.auto_assign_after_minutes * 60_000) return 0
 
   const { data: agentRows } = await db
     .from('profiles')
     .select('user_id')
     .eq('account_id', account.id)
     .eq('account_role', 'agent')
+    .eq('available_for_assignment', true)
     .order('created_at', { ascending: true })
   const agents = ((agentRows ?? []) as { user_id: string }[]).map((r) => r.user_id)
   if (agents.length === 0) return 0
 
   const cutoff = new Date(now.getTime() - account.auto_assign_after_minutes * 60_000).toISOString()
+  const oldest = new Date(now.getTime() - account.auto_assign_max_age_days * 86_400_000).toISOString()
   const { data: stalled } = await db
     .from('conversations')
     .select('id')
@@ -97,8 +113,11 @@ async function assignForAccount(
     .is('assigned_agent_id', null)
     .not('last_message_at', 'is', null)
     .lt('last_message_at', cutoff)
-    .order('last_message_at', { ascending: true })
-    .limit(MAX_PER_RUN)
+    .gte('last_message_at', oldest)
+    // Gradual and recent first: a few per agent per sweep, the freshest leads
+    // before the ones that have been cold for days.
+    .order('last_message_at', { ascending: false })
+    .limit(agents.length * account.auto_assign_batch_per_agent)
   const ids = ((stalled ?? []) as { id: string }[]).map((r) => r.id)
   if (ids.length === 0) return 0
 

@@ -19,6 +19,12 @@ import {
 
 type Unit = 'minutes' | 'hours';
 
+interface AgentRow {
+  user_id: string;
+  name: string | null;
+  available: boolean;
+}
+
 /** Show whole hours as hours, anything else as minutes. */
 function toDisplay(minutes: number): { value: number; unit: Unit } {
   return minutes >= 60 && minutes % 60 === 0
@@ -40,6 +46,9 @@ export function AssignmentRuleCard() {
   const [enabled, setEnabled] = useState(false);
   const [value, setValue] = useState('60');
   const [unit, setUnit] = useState<Unit>('minutes');
+  const [maxAgeDays, setMaxAgeDays] = useState('7');
+  const [batchPerAgent, setBatchPerAgent] = useState('3');
+  const [agents, setAgents] = useState<AgentRow[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +59,9 @@ export function AssignmentRuleCard() {
       setEnabled(data.enabled === true);
       setValue(String(shown.value));
       setUnit(shown.unit);
+      setMaxAgeDays(String(data.max_age_days ?? 7));
+      setBatchPerAgent(String(data.batch_per_agent ?? 3));
+      setAgents(Array.isArray(data.agents) ? data.agents : []);
     } finally {
       setLoading(false);
     }
@@ -61,13 +73,35 @@ export function AssignmentRuleCard() {
 
   if (!canEdit) return null;
 
+  const setAvailability = async (userId: string, available: boolean) => {
+    // Optimistic: flip it now, undo if the server refuses.
+    setAgents((list) => list.map((a) => (a.user_id === userId ? { ...a, available } : a)));
+    try {
+      const res = await fetch('/api/account/assignment/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, available }),
+      });
+      if (!res.ok) throw new Error('save failed');
+    } catch {
+      setAgents((list) => list.map((a) => (a.user_id === userId ? { ...a, available: !available } : a)));
+      toast.error(t('saveFailed'));
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
       const res = await fetch('/api/account/assignment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, value: Number(value), unit }),
+        body: JSON.stringify({
+          enabled,
+          value: Number(value),
+          unit,
+          max_age_days: Number(maxAgeDays),
+          batch_per_agent: Number(batchPerAgent),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -131,6 +165,60 @@ export function AssignmentRuleCard() {
                   <option value="hours">{t('hours')}</option>
                 </select>
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="assign-age">{t('maxAge')}</Label>
+                <Input
+                  id="assign-age"
+                  type="number"
+                  min={1}
+                  max={90}
+                  step={1}
+                  value={maxAgeDays}
+                  onChange={(e) => setMaxAgeDays(e.target.value)}
+                  className="w-28"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="assign-batch">{t('batch')}</Label>
+                <Input
+                  id="assign-batch"
+                  type="number"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={batchPerAgent}
+                  onChange={(e) => setBatchPerAgent(e.target.value)}
+                  className="w-28"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{t('pacingNote')}</p>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">{t('agentsTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('agentsDesc')}</p>
+              {agents.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t('noAgents')}</p>
+              ) : (
+                <ul className="divide-y divide-border rounded-md border border-border">
+                  {agents.map((a) => (
+                    <li key={a.user_id} className="flex items-center justify-between gap-3 px-3 py-2">
+                      <span className="text-sm text-foreground">{a.name ?? a.user_id}</span>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {a.available ? t('available') : t('away')}
+                        <Switch
+                          checked={a.available}
+                          onCheckedChange={(v) => void setAvailability(a.user_id, v)}
+                          aria-label={a.name ?? a.user_id}
+                        />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <p className="text-xs text-muted-foreground">{t('note')}</p>

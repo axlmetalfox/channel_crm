@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isOnDuty, parseSchedule, type AutoReplySchedule } from './schedule'
+import { isOnDuty, offDutySince, parseSchedule, type AutoReplySchedule } from './schedule'
 
 // Intertec's agent hours: Mon–Thu 5:00pm → 7:30am, Fri 4:30pm → Mon 7:30am.
 const INTERTEC: AutoReplySchedule = {
@@ -59,6 +59,24 @@ describe('isOnDuty', () => {
     expect(isOnDuty(INTERTEC, new Date('2026-10-14T20:00:00Z'))).toBe(false)
     // 23:00 UTC is 18:00 in Bogotá: on duty.
     expect(isOnDuty(INTERTEC, new Date('2026-10-14T23:00:00Z'))).toBe(true)
+  })
+})
+
+describe('offDutySince', () => {
+  it('is when the working hours started', () => {
+    // Wednesday 14:00 Bogotá: the AI went off duty at 07:30 the same day.
+    expect(offDutySince(INTERTEC, bogota(2, '14:00'))?.toISOString()).toBe(bogota(2, '07:30').toISOString())
+    // Monday 09:00: the AI went off duty at 07:30 that Monday, not the Friday before.
+    expect(offDutySince(INTERTEC, bogota(7, '09:00'))?.toISOString()).toBe(bogota(7, '07:30').toISOString())
+  })
+
+  it('is null while the AI is on duty or when there is no schedule', () => {
+    expect(offDutySince(INTERTEC, bogota(2, '20:00'))).toBeNull()
+    expect(offDutySince(null, bogota(2, '14:00'))).toBeNull()
+  })
+
+  it('is null when the period began before the lookback', () => {
+    expect(offDutySince(INTERTEC, bogota(2, '14:00'), 1)).toBeNull()
   })
 })
 
