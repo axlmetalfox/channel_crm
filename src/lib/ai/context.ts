@@ -4,8 +4,13 @@ import { aiContextMessageLimit } from './defaults'
 
 interface DbMessage {
   sender_type: 'customer' | 'agent' | 'bot'
+  content_type: string
   content_text: string | null
 }
+
+/** Marks text that came from a voice note, so the agent knows it may contain
+ *  recognition mistakes (emails, IDs, phone numbers, proper names). */
+export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito] '
 
 /**
  * Fetch the last N text messages of a conversation and map them to the
@@ -23,9 +28,9 @@ export async function buildConversationContext(
 ): Promise<ChatMessage[]> {
   const { data, error } = await db
     .from('messages')
-    .select('sender_type, content_text')
+    .select('sender_type, content_type, content_text')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
+    .in('content_type', ['text', 'audio'])
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -36,6 +41,7 @@ export async function buildConversationContext(
     .filter((m) => m.content_text && m.content_text.trim())
     .map((m) => ({
       role: m.sender_type === 'customer' ? 'user' : 'assistant',
-      content: m.content_text!.trim(),
+      content:
+        (m.content_type === 'audio' ? AUDIO_TRANSCRIPT_PREFIX : '') + m.content_text!.trim(),
     }))
 }

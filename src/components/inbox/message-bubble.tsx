@@ -121,6 +121,11 @@ function MessageContent({
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
+          {message.content_text && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs italic opacity-80">
+              {message.content_text}
+            </p>
+          )}
         </div>
       );
 

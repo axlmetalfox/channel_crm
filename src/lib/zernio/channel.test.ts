@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound } from './events'
 
@@ -12,6 +12,9 @@ const h = vi.hoisted(() => ({
   dispatchNonText: vi.fn(),
   dispatchWebhook: vi.fn(),
   mirror: vi.fn(),
+  transcribe: vi.fn(),
+  loadAiConfig: vi.fn(),
+  logUsage: vi.fn(),
   state: {
     conversation: null as Record<string, unknown> | null,
     existingConversation: true,
@@ -36,6 +39,13 @@ vi.mock('@/lib/ai/auto-reply', () => ({
 }))
 vi.mock('@/lib/webhooks/deliver', () => ({ dispatchWebhookEvent: h.dispatchWebhook }))
 vi.mock('@/lib/whatsapp/mirror-inbound-media', () => ({ mirrorInboundMedia: h.mirror }))
+vi.mock('@/lib/ai/config', () => ({ loadAiConfig: h.loadAiConfig }))
+vi.mock('@/lib/ai/usage', () => ({ logAiUsage: h.logUsage }))
+vi.mock('@/lib/ai/transcribe', () => ({
+  AUDIO_MAX_BYTES: 1_000_000,
+  transcribeAudio: h.transcribe,
+  transcriptionModel: () => process.env.AI_TRANSCRIBE_MODEL?.trim() || null,
+}))
 
 import { sendMediaViaZernio, sendTextViaZernio } from './send'
 import { processZernioInbound, processZernioStatus } from './inbound'
@@ -136,6 +146,9 @@ beforeEach(() => {
   h.dispatchAi.mockResolvedValue(undefined)
   h.dispatchWebhook.mockResolvedValue(undefined)
   h.mirror.mockResolvedValue(null)
+  h.loadAiConfig.mockResolvedValue({ provider: 'openai', apiKey: 'k' })
+  h.transcribe.mockResolvedValue({ text: null, usage: null })
+  delete process.env.AI_TRANSCRIBE_MODEL
 })
 
 describe('sendTextViaZernio', () => {
@@ -426,6 +439,67 @@ describe('processZernioInbound', () => {
     )
     const updated = written('messages', 'update').find((o) => o.values?.media_url)
     expect(updated?.values?.media_url).toContain('chat-media')
+  })
+
+  describe('voice notes', () => {
+    const VOICE = {
+      ...INBOUND,
+      text: null,
+      contentType: 'audio' as const,
+      mediaUrl: 'https://zernio.com/api/v1/whatsapp/media/9?accountId=zacc',
+      mimeType: 'audio/ogg; codecs=opus',
+    }
+    const bucketUrl = 'https://files.example/chat-media/account-acct-1/inbound/voz.ogg'
+
+    beforeEach(() => {
+      process.env.AI_TRANSCRIBE_MODEL = 'gemini-2.5-flash-lite'
+      h.mirror.mockResolvedValue(bucketUrl)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+          headers: { get: () => 'audio/ogg' },
+        }),
+      )
+    })
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('turns what was said into text, keeps it on the message and answers it like a typed one', async () => {
+      h.transcribe.mockResolvedValue({ text: 'Necesito una máquina para queso', usage: null })
+      await processZernioInbound(fakeDb(), CONFIG, VOICE)
+      expect(h.transcribe).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'gemini-2.5-flash-lite', mimeType: 'audio/ogg; codecs=opus' }),
+      )
+      expect(written('messages', 'update').some((o) => o.values?.content_text === 'Necesito una máquina para queso')).toBe(true)
+      expect(h.dispatchAi).toHaveBeenCalled()
+      expect(h.dispatchNonText).not.toHaveBeenCalled()
+      expect(h.logUsage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mode: 'audio_transcribe' }))
+    })
+
+    it('falls back to asking the customer to write when it cannot be made out', async () => {
+      h.transcribe.mockResolvedValue({ text: null, usage: null })
+      await processZernioInbound(fakeDb(), CONFIG, VOICE)
+      expect(h.dispatchAi).not.toHaveBeenCalled()
+      expect(h.dispatchNonText).toHaveBeenCalled()
+    })
+
+    it('falls back too when the provider fails or the feature is off', async () => {
+      h.transcribe.mockRejectedValue(new Error('provider down'))
+      await processZernioInbound(fakeDb(), CONFIG, VOICE)
+      expect(h.dispatchNonText).toHaveBeenCalledTimes(1)
+
+      delete process.env.AI_TRANSCRIBE_MODEL
+      h.transcribe.mockClear()
+      await processZernioInbound(fakeDb(), CONFIG, { ...VOICE, eventId: 'e5', messageId: 'zmsg-in-5' })
+      expect(h.transcribe).not.toHaveBeenCalled()
+      expect(h.dispatchNonText).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not transcribe photos or videos', async () => {
+      await processZernioInbound(fakeDb(), CONFIG, { ...VOICE, contentType: 'image' as const, mimeType: 'image/jpeg' })
+      expect(h.transcribe).not.toHaveBeenCalled()
+    })
   })
 
   it('keeps the original link when the copy fails, and does not copy plain text', async () => {

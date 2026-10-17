@@ -408,20 +408,20 @@ export async function loadInterviewMessages(
 ): Promise<ChatMessage[]> {
   const { data, error } = await db
     .from('messages')
-    .select('sender_type, content_text')
+    .select('sender_type, content_type, content_text')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
+    .in('content_type', ['text', 'audio'])
     .lte('created_at', intakeCreatedAt)
     .order('created_at', { ascending: false })
     .limit(TRANSCRIPT_MESSAGE_LIMIT)
   if (error) throw error
 
-  return ((data ?? []) as { sender_type: string; content_text: string | null }[])
+  return ((data ?? []) as { sender_type: string; content_type: string; content_text: string | null }[])
     .reverse()
     .filter((m) => m.content_text && m.content_text.trim())
     .map((m) => ({
       role: m.sender_type === 'customer' ? 'user' : 'assistant',
-      content: m.content_text!.trim(),
+      content: (m.content_type === 'audio' ? '[Audio transcrito] ' : '') + m.content_text!.trim(),
     }))
 }
 

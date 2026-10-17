@@ -7,6 +7,10 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from '@/lib/ai/auto-reply'
 import { isSocialShareOnly } from '@/lib/ai/social-links'
 import { mirrorInboundMedia, type MirrorStorage } from '@/lib/whatsapp/mirror-inbound-media'
+import { loadAiConfig } from '@/lib/ai/config'
+import { logAiUsage } from '@/lib/ai/usage'
+import { AUDIO_MAX_BYTES, transcribeAudio, transcriptionModel } from '@/lib/ai/transcribe'
+import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound, ZernioStatus } from './events'
@@ -155,6 +159,50 @@ async function botHasSpoken(db: SupabaseClient, conversationId: string): Promise
   return (count ?? 0) > 0
 }
 
+/**
+ * Turn a voice note into text with the account's AI key. Returns null when
+ * the feature is off, the note cannot be fetched or made out, or the
+ * provider fails: the caller then asks the customer to write. Records the
+ * cost in the usage log.
+ */
+async function transcribeVoiceNote(
+  db: SupabaseClient,
+  accountId: string,
+  conversationId: string,
+  url: string,
+  mimeType: string | null,
+): Promise<string | null> {
+  const model = transcriptionModel()
+  if (!model) return null
+  try {
+    const ai = await loadAiConfig(db, accountId)
+    if (!ai || ai.provider !== 'openai') return null
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
+    if (!res.ok) return null
+    const audio = new Uint8Array(await res.arrayBuffer())
+    if (audio.byteLength === 0 || audio.byteLength > AUDIO_MAX_BYTES) return null
+    const out = await transcribeAudio({
+      apiKey: ai.apiKey,
+      model,
+      audio,
+      mimeType: mimeType ?? res.headers.get('content-type'),
+      timeoutMs: aiRequestTimeoutMs(),
+    })
+    void logAiUsage(db, {
+      accountId,
+      conversationId,
+      mode: 'audio_transcribe',
+      provider: ai.provider,
+      model,
+      usage: out.usage,
+    })
+    return out.text
+  } catch (err) {
+    console.error('[zernio inbound] voice note transcription failed:', err)
+    return null
+  }
+}
+
 /** Process one customer message that arrived through Zernio. */
 export async function processZernioInbound(
   db: SupabaseClient,
@@ -222,6 +270,8 @@ export async function processZernioInbound(
   }
   if (!inserted || inserted.length === 0) return // replay
 
+  let voiceText: string | null = null
+
   // A photo, video, voice note or document: Zernio's link for it needs our API
   // key, so the team's browsers cannot open it. Copy it into our own
   // storage and point the message there (best effort: if it fails, the
@@ -242,6 +292,17 @@ export async function processZernioInbound(
         .from('messages')
         .update({ media_url: mirrored })
         .eq('id', (inserted[0] as { id: string }).id)
+
+      // A voice note: put what was said in words, so the agent can answer it.
+      if (msg.contentType === 'audio') {
+        voiceText = await transcribeVoiceNote(db, config.accountId, conversation.id, mirrored, msg.mimeType)
+        if (voiceText) {
+          await db
+            .from('messages')
+            .update({ content_text: voiceText })
+            .eq('id', (inserted[0] as { id: string }).id)
+        }
+      }
     }
   }
 
@@ -275,7 +336,7 @@ export async function processZernioInbound(
 
   await reopenClosedConversation(db, conversation as { id: string; status?: string | null })
 
-  const inboundText = msg.text ?? ''
+  const inboundText = msg.text ?? voiceText ?? ''
 
   const flowResult = await dispatchInboundToFlows({
     accountId: config.accountId,

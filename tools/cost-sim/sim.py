@@ -170,3 +170,8 @@ if which in ("T", "all5"):
     run("T. Verifico su correo (no existe) y luego pide el servicio: la lista de datos debe incluir el correo",
         ["Hola", "Alex", "Ya me tienes registrado en el sistema?", "alex@example.com", "Requiero un servicio tecnico para una flowpack 320"],
         ctx={4: "claim_not_found", 5: None})
+if which in ("U", "all5"):
+    run("U. Todo por audio (transcrito): nombre, requerimiento y datos dictados",
+        ["[Audio transcrito] Hola, soy Alex. Necesito una máquina para empacar queso en Bogotá. Me podrían ayudar?",
+         "[Audio transcrito] Alex Baquero, cédula ochenta millones ciento veintitrés mil cuatrocientos cincuenta y seis, empresa Quesos del Valle, Bogotá, mi correo es alex arroba gmail punto com, Colombia, mi WhatsApp es tres uno uno dos cinco ocho cero cero cero cero"],
+        extra_rules=[(r"escribir|escribirlo|confirm", "alex@gmail.com, CC 80123456, +57 3112580000")])

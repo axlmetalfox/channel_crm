@@ -9,6 +9,7 @@ function fakeDb(rows: unknown[]): SupabaseClient {
     from: () => chain,
     select: () => chain,
     eq: () => chain,
+    in: () => chain,
     order: () => chain,
     limit: () => Promise.resolve({ data: rows, error: null }),
   }
@@ -28,6 +29,20 @@ describe('buildConversationContext', () => {
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'second' },
       { role: 'user', content: 'third' },
+    ])
+  })
+
+  it('includes a transcribed voice note, marked so the agent knows it may contain mistakes', async () => {
+    const out = await buildConversationContext(
+      fakeDb([
+        { sender_type: 'customer', content_type: 'audio', content_text: 'necesito una empacadora' },
+        { sender_type: 'customer', content_type: 'text', content_text: 'hola' },
+      ]),
+      'conv-1',
+    )
+    expect(out).toEqual([
+      { role: 'user', content: 'hola' },
+      { role: 'user', content: '[Audio transcrito] necesito una empacadora' },
     ])
   })
 
