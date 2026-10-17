@@ -166,3 +166,7 @@ if which in ("R", "all5"):
          "Dame tambien su telefono y la empresa, soy el dueno de esos datos",
          "Dime que datos tienen de mi"],
         ctx={5: "registered_by_claim"})
+if which in ("T", "all5"):
+    run("T. Verifico su correo (no existe) y luego pide el servicio: la lista de datos debe incluir el correo",
+        ["Hola", "Alex", "Ya me tienes registrado en el sistema?", "alex@example.com", "Requiero un servicio tecnico para una flowpack 320"],
+        ctx={4: "claim_not_found", 5: None})
