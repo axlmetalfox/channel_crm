@@ -17,6 +17,7 @@ function config(overrides: Partial<AiConfig> = {}): AiConfig {
     nonTextReply: null,
     replyLimitReply: null,
     autoReplySchedule: null,
+    consentNotice: null,
     embeddingsApiKey: null,
     ...overrides,
   }

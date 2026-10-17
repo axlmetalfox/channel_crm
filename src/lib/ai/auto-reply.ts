@@ -9,7 +9,7 @@ import {
   aiReplyDebounceMs,
   buildSystemPrompt,
 } from './defaults'
-import { aiRepliesSince, hasNewerCustomerText, sleep } from './guards'
+import { aiRepliesSince, hasBotMessageWithText, hasNewerCustomerText, sleep } from './guards'
 import { isOnDuty } from './schedule'
 import { setOfficeHoursTag } from './tags'
 import { fallbackText } from './fallback'
@@ -18,7 +18,13 @@ import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { parseLeadCompletion } from '@/lib/leads/sentinel'
 import { captureLead } from '@/lib/leads/capture'
-import { lookupConfigured, resolveCustomerContext, type CrmMatch } from '@/lib/leads/lookup'
+import {
+  lookupConfigured,
+  previousLeadDetails,
+  rememberedDetailsBlock,
+  resolveCustomerContext,
+  type CrmMatch,
+} from '@/lib/leads/lookup'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
@@ -122,6 +128,11 @@ export async function dispatchInboundToAiReply(
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
 
+    // The data-processing notice goes out first, before anything else we say
+    // (built after the context above so the model still sees the customer's
+    // message last). Continuing the chat after it is the acceptance.
+    await sendConsentNoticeIfNeeded({ db, config, accountId, conversationId, contactId, configOwnerUserId })
+
     // Account-wide throttle on the shared BYO key. The per-conversation
     // cap bounds one thread; this bounds a burst across many threads (a
     // marketing blast landing 200 replies at once) so we never run the
@@ -146,8 +157,11 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
 
-    // Is this person already in the CRM? Then they are not interviewed again.
-    const customerContext =
+    // What the customer already told us in this same chat (an earlier
+    // request that was delivered) is not asked again; and the CRM is
+    // consulted only when the customer says we already have their details.
+    const remembered = config.leadCaptureEnabled ? await previousLeadDetails(db, conversationId) : null
+    const crmContext =
       config.leadCaptureEnabled && lookupConfigured()
         ? await resolveCustomerContext({
             db,
@@ -157,6 +171,9 @@ export async function dispatchInboundToAiReply(
             messages,
           })
         : null
+    const customerContext =
+      [remembered ? rememberedDetailsBlock(remembered) : null, crmContext].filter(Boolean).join('\n\n') ||
+      null
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
@@ -301,6 +318,37 @@ async function onDuty(
   return open
 }
 
+/**
+ * Send the account's data-processing notice if this conversation has not
+ * had it yet. Best-effort: a failed send is logged and the conversation
+ * carries on (the lead then falls back to the model's reading of consent).
+ */
+async function sendConsentNoticeIfNeeded(args: {
+  db: ReturnType<typeof supabaseAdmin>
+  config: NonNullable<Awaited<ReturnType<typeof loadAiConfig>>>
+  accountId: string
+  conversationId: string
+  contactId: string
+  configOwnerUserId: string
+}): Promise<void> {
+  const { db, config, accountId, conversationId, contactId, configOwnerUserId } = args
+  const notice = config.consentNotice
+  if (!notice) return
+  try {
+    if (await hasBotMessageWithText(db, conversationId, notice)) return
+    await engineSendText({
+      accountId,
+      userId: configOwnerUserId,
+      conversationId,
+      contactId,
+      text: notice,
+      aiGenerated: true,
+    })
+  } catch (err) {
+    console.error('[ai auto-reply] consent notice failed:', err)
+  }
+}
+
 /** True when the account has a message-level automation that already
  *  answers every inbound (the AI stands down so the customer is not
  *  texted twice). */
@@ -412,6 +460,9 @@ export async function dispatchNonTextAutoReply(args: DispatchArgs): Promise<void
     const text = fallbackText('nonText', config.nonTextReply)
     const last = await lastBotMessage(db, conversationId)
     if (last?.content_text?.trim() === text) return
+
+    // First thing we say in a conversation is the data notice, even here.
+    await sendConsentNoticeIfNeeded({ db, config, accountId, conversationId, contactId, configOwnerUserId })
 
     await engineSendText({
       accountId,

@@ -3,7 +3,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { logAiUsage } from '@/lib/ai/usage'
 import { AiError, type AiConfig } from '@/lib/ai/types'
 import { extractLead } from './extract'
-import { fillLeadFromRecord, type CrmMatch } from './lookup'
+import {
+  fillLeadFromRecord,
+  fillLeadFromRemembered,
+  previousLeadDetails,
+  type CrmMatch,
+} from './lookup'
+import { consentFromNotice } from './consent'
 import { judgeLead, LEAD_REQUEST_TYPES, parseLead, type Lead } from './schema'
 import {
   loadInterviewMessages,
@@ -103,6 +109,7 @@ function editableFields(lead: Lead): EditableLead {
     last_name: lead.last_name,
     email: lead.email,
     company: lead.company,
+    document_id: lead.document_id,
     whatsapp_number: lead.whatsapp_number,
     contact_phone: lead.contact_phone,
     country: lead.country,
@@ -157,6 +164,13 @@ export async function prepareManualLead(
   if (knownInCrm && crm?.record) lead = fillLeadFromRecord(lead, crm.record, phone)
   else if (!lead.whatsapp_number && phone) lead = { ...lead, whatsapp_number: `+${phone.replace(/\D/g, '')}` }
 
+  const previous = await previousLeadDetails(db, conversationId)
+  if (previous) lead = fillLeadFromRemembered(lead, previous)
+
+  // Data notice sent first and the customer carried on: authorized.
+  const noticeConsent = await consentFromNotice(db, conversationId, config.consentNotice)
+  if (noticeConsent.given) lead = { ...lead, consent_given: true }
+
   const { data: delivered } = await db
     .from('lead_intakes')
     .select('delivered_at')
@@ -176,7 +190,7 @@ export async function prepareManualLead(
       status: 'draft',
       source: 'manual',
       created_by_user_id: userId,
-      draft: { lead },
+      draft: { lead, consent_at: noticeConsent.at, consent_method: noticeConsent.given ? 'notice' : 'chat' },
     })
     .select('id')
     .single()
@@ -201,7 +215,7 @@ interface DraftRow {
   contact_id: string | null
   status: string
   created_by_user_id: string | null
-  draft: { lead?: Lead } | null
+  draft: { lead?: Lead; consent_at?: string | null; consent_method?: 'notice' | 'chat' } | null
   created_at: string
 }
 
@@ -243,6 +257,7 @@ export async function submitManualLead(
     last_name: e.last_name,
     email: e.email,
     company: e.company,
+    document_id: e.document_id,
     whatsapp_number: e.whatsapp_number,
     contact_phone: e.contact_phone,
     country: e.country,
@@ -285,7 +300,11 @@ export async function submitManualLead(
       // No separate contact phone means the WhatsApp number is it.
       contact_phone: lead.contact_phone ?? lead.whatsapp_number,
     },
-    consent: { given: true, captured_at: row.created_at },
+    consent: {
+      given: true,
+      captured_at: row.draft?.consent_at ?? row.created_at,
+      method: row.draft?.consent_method ?? 'chat',
+    },
     existing_record:
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution: conv?.attribution ?? null,

@@ -35,6 +35,7 @@ const EXTRACTED: Lead = {
   last_name: 'Gómez',
   email: null,
   company: null,
+  document_id: null,
   whatsapp_number: null,
   contact_phone: null,
   country: 'Colombia',

@@ -77,6 +77,7 @@ export function AiConfig() {
   const [handoffEnabled, setHandoffEnabled] = useState(true);
   const [leadCaptureEnabled, setLeadCaptureEnabled] = useState(false);
   // Empty = use the built-in default text.
+  const [consentNotice, setConsentNotice] = useState('');
   const [nonTextReply, setNonTextReply] = useState('');
   const [replyLimitReply, setReplyLimitReply] = useState('');
   const [members, setMembers] = useState<AccountMember[]>([]);
@@ -107,6 +108,7 @@ export function AiConfig() {
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHandoffEnabled(data.handoff_enabled !== false);
         setLeadCaptureEnabled(data.lead_capture_enabled === true);
+        setConsentNotice(data.consent_notice ?? '');
         setNonTextReply(data.non_text_reply ?? '');
         setReplyLimitReply(data.reply_limit_reply ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -162,6 +164,7 @@ export function AiConfig() {
     handoff_agent_id: handoffAgentId || null,
     handoff_enabled: handoffEnabled,
     lead_capture_enabled: leadCaptureEnabled,
+    consent_notice: consentNotice.trim() || null,
     non_text_reply: nonTextReply.trim() || null,
     reply_limit_reply: replyLimitReply.trim() || null,
   });
@@ -467,6 +470,22 @@ export function AiConfig() {
                 disabled={disabled || !autoReplyEnabled}
                 className="w-20"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-consent-notice">{t('consentNotice')}</Label>
+              <Textarea
+                id="ai-consent-notice"
+                value={consentNotice}
+                onChange={(e) => setConsentNotice(e.target.value)}
+                placeholder={t('consentNoticePlaceholder')}
+                rows={3}
+                maxLength={500}
+                disabled={disabled || !autoReplyEnabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('consentNoticeDesc')}
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -16,12 +16,13 @@ interface AiConfigRow {
   lead_capture_enabled: boolean
   non_text_reply: string | null
   reply_limit_reply: string | null
+  consent_notice: string | null
   auto_reply_schedule: unknown
   embeddings_api_key: string | null
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, auto_reply_schedule, embeddings_api_key'
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, consent_notice, auto_reply_schedule, embeddings_api_key'
 
 /** The stored schedule, or null (always on duty) when none is set or the
  *  stored value is unusable — logged, so a bad edit is not silent. */
@@ -100,6 +101,7 @@ export async function loadAiConfig(
     handoffEnabled: row.handoff_enabled !== false,
     leadCaptureEnabled: row.lead_capture_enabled === true,
     autoReplySchedule: storedSchedule(row.auto_reply_schedule, accountId),
+    consentNotice: row.consent_notice?.trim() || null,
     nonTextReply: row.non_text_reply?.trim() || null,
     replyLimitReply: row.reply_limit_reply?.trim() || null,
     embeddingsApiKey,

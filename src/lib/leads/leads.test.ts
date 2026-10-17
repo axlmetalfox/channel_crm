@@ -68,6 +68,7 @@ const RAW = {
   last_name: 'Pérez Gómez',
   email: 'JC@Lacteos.co',
   company: null,
+  document_id: ' 900.123.456-7 ',
   whatsapp_number: '+57 311 258 0000',
   contact_phone: '310 255 6678',
   country: 'Colombia',
@@ -83,10 +84,26 @@ describe('parseLead', () => {
       first_name: 'Juan Carlos',
       email: 'jc@lacteos.co',
       whatsapp_number: '+573112580000',
-      contact_phone: '3102556678',
+      // A Colombian mobile typed without the country code gets the 57.
+      contact_phone: '+573102556678',
+      document_id: '900.123.456-7',
       company: null,
       request_type: 'maquina_nueva',
     })
+  })
+
+  it('adds 57 only to Colombian ten-digit mobiles written without a country code', () => {
+    const phones = (extra: Record<string, unknown>) => {
+      const lead = parseLead({ ...RAW, whatsapp_number: '3112580000', contact_phone: null, ...extra })
+      return lead?.whatsapp_number
+    }
+    expect(phones({})).toBe('+573112580000')
+    expect(phones({ country: ' colombia ' })).toBe('+573112580000')
+    // Not Colombia: a bare national number cannot be placed, so it stays unresolved.
+    expect(phones({ country: 'Ecuador' })).toBeNull()
+    // Already international, or not a mobile (does not start with 3): untouched.
+    expect(phones({ whatsapp_number: '+593991234567', country: 'Colombia' })).toBe('+593991234567')
+    expect(phones({ whatsapp_number: '6012345678', country: 'Colombia' })).toBeNull()
   })
 
   it('rejects an unknown request type', () => {

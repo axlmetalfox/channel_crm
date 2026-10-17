@@ -33,6 +33,8 @@ export interface CrmRecord {
   last_name: string | null
   email: string | null
   company: string | null
+  /** Cédula or NIT. */
+  document_id: string | null
   mobile: string | null
   phone: string | null
   country: string | null
@@ -53,6 +55,17 @@ export type LookupOutcome =
   | { status: 'found'; module: string; id: string; record: CrmRecord }
   | { status: 'not_found' }
   | { status: 'error' }
+
+/**
+ * Whether the customer is looked up in the CRM on their own (by the
+ * WhatsApp number on the first message, or by offering the email check
+ * when the number is hidden). Off by default: the lookup then only runs
+ * when the customer says the business already has their details.
+ * Switch on with CUSTOMER_LOOKUP_AUTO=true.
+ */
+export function lookupAutoEnabled(): boolean {
+  return process.env.CUSTOMER_LOOKUP_AUTO?.trim().toLowerCase() === 'true'
+}
 
 export function lookupConfigured(): boolean {
   return !!(process.env.CUSTOMER_LOOKUP_URL?.trim() && process.env.CUSTOMER_LOOKUP_SECRET?.trim())
@@ -89,6 +102,7 @@ export async function lookupCustomer(clue: {
         last_name: cleanText(r.last_name),
         email: normalizeEmail(r.email),
         company: cleanText(r.company),
+        document_id: cleanText(r.document_id),
         mobile: cleanText(r.mobile),
         phone: cleanText(r.phone),
         country: cleanText(r.country),
@@ -191,6 +205,7 @@ export function fillLeadFromRecord(
   }
   out.email = out.email ?? record.email
   out.company = out.company ?? record.company
+  out.document_id = out.document_id ?? record.document_id
   out.country = out.country ?? record.country
   out.city = out.city ?? record.city
   out.contact_phone = out.contact_phone ?? record.phone ?? record.mobile
@@ -234,7 +249,7 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
       .maybeSingle()
     const phone = ((contact?.phone as string | null | undefined) ?? '').trim()
 
-    if (phone && matchIsStale(match)) {
+    if (phone && lookupAutoEnabled() && matchIsStale(match)) {
       const found = await lookupCustomer({ phone })
       if (found.status === 'found') {
         await save({
@@ -281,7 +296,7 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
     }
 
     // 3. No visible number: offer the email check once, on the first reply.
-    if (!phone && !messages.some((m) => m.role === 'assistant')) {
+    if (lookupAutoEnabled() && !phone && !messages.some((m) => m.role === 'assistant')) {
       return customerContextBlock('ask_verification')
     }
     return null
@@ -289,4 +304,86 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
     console.error('[customer lookup] resolve failed:', err)
     return null
   }
+}
+
+interface RememberedLead {
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+  company: string | null
+  document_id: string | null
+  whatsapp_number: string | null
+  country: string | null
+  city: string | null
+}
+
+/**
+ * The details the customer gave for an earlier request that was delivered
+ * from this same conversation, or null. They are the customer's own words
+ * in this chat, so they can be shown to the model: a new request does not
+ * ask for them again.
+ */
+export async function previousLeadDetails(
+  db: SupabaseClient,
+  conversationId: string,
+): Promise<RememberedLead | null> {
+  const { data } = await db
+    .from('lead_intakes')
+    .select('payload')
+    .eq('conversation_id', conversationId)
+    .eq('status', 'delivered')
+    .order('delivered_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const lead = (data?.payload as { lead?: Partial<RememberedLead> } | null | undefined)?.lead
+  if (!lead || typeof lead !== 'object') return null
+  return {
+    first_name: lead.first_name ?? null,
+    last_name: lead.last_name ?? null,
+    email: lead.email ?? null,
+    company: lead.company ?? null,
+    document_id: lead.document_id ?? null,
+    whatsapp_number: lead.whatsapp_number ?? null,
+    country: lead.country ?? null,
+    city: lead.city ?? null,
+  }
+}
+
+/** The prompt block that stops the agent from asking for those details again. */
+export function rememberedDetailsBlock(lead: RememberedLead): string {
+  const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ')
+  const parts: [string, string | null][] = [
+    ['name', name || null],
+    ['ID (cédula/NIT)', lead.document_id],
+    ['company', lead.company],
+    ['city', lead.city],
+    ['email', lead.email],
+    ['country', lead.country],
+    ['WhatsApp', lead.whatsapp_number],
+  ]
+  const known = parts.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`)
+  return (
+    "DETAILS ALREADY REGISTERED FROM THIS CUSTOMER'S EARLIER REQUEST IN THIS CHAT (the customer gave them themselves; " +
+    `${known.join('; ')}). Do not ask for any of them again. When the business instructions reach the step that asks for the customer's details for a new request, skip it: ` +
+    'tell them in one short line that you will keep the same contact details, and continue with the next step.'
+  )
+}
+
+/**
+ * Fill what the chat did not state with the details of an earlier
+ * delivered request from this conversation (never overriding the chat).
+ */
+export function fillLeadFromRemembered(lead: Lead, previous: RememberedLead): Lead {
+  const out = { ...lead }
+  if (!out.first_name) {
+    out.first_name = previous.first_name
+    out.last_name = out.last_name ?? previous.last_name
+  }
+  out.email = out.email ?? previous.email
+  out.company = out.company ?? previous.company
+  out.document_id = out.document_id ?? previous.document_id
+  out.whatsapp_number = out.whatsapp_number ?? previous.whatsapp_number
+  out.country = out.country ?? previous.country
+  out.city = out.city ?? previous.city
+  return out
 }

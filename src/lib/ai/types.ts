@@ -37,6 +37,9 @@ export interface AiConfig {
   leadCaptureEnabled: boolean
   /** Weekly windows when the agent answers; null = always. */
   autoReplySchedule: AutoReplySchedule | null
+  /** Data-processing notice sent as the first message of a conversation;
+   *  continuing the chat is the acceptance. Null = none. */
+  consentNotice: string | null
   /** Fixed reply to a non-text message; null = built-in default. */
   nonTextReply: string | null
   /** Fixed reply sent once at the reply cap; null = built-in default. */

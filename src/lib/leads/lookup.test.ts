@@ -18,6 +18,7 @@ const RECORD: CrmRecord = {
   last_name: 'Gómez',
   email: 'ana@x.co',
   company: 'Lácteos',
+  document_id: null,
   mobile: null,
   phone: '3001112233',
   country: 'Colombia',
@@ -36,6 +37,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   delete process.env.CUSTOMER_LOOKUP_URL
   delete process.env.CUSTOMER_LOOKUP_SECRET
+  delete process.env.CUSTOMER_LOOKUP_AUTO
 })
 
 const reply = (body: unknown, ok = true) =>
@@ -132,6 +134,7 @@ describe('fillLeadFromRecord', () => {
     last_name: null,
     email: null,
     company: null,
+    document_id: null,
     whatsapp_number: null,
     contact_phone: null,
     country: null,
@@ -181,7 +184,32 @@ describe('resolveCustomerContext', () => {
     saved.length = 0
   })
 
+  it('looks no one up on its own by default: only when the customer says we have their details', async () => {
+    reply({ found: true, module: 'Leads', id: 'z1', record: { first_name: 'Ana' } })
+    // First message, number visible: nothing happens.
+    expect(
+      await resolveCustomerContext({
+        db: db(),
+        ...args,
+        stored: null,
+        messages: [{ role: 'user', content: 'Hola' }],
+      }),
+    ).toBeNull()
+    // First message, number hidden: no email check is offered either.
+    expect(
+      await resolveCustomerContext({
+        db: db(''),
+        ...args,
+        stored: null,
+        messages: [{ role: 'user', content: 'Hola' }],
+      }),
+    ).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(saved).toHaveLength(0)
+  })
+
   it('recognises the WhatsApp number, greets by first name and remembers it', async () => {
+    process.env.CUSTOMER_LOOKUP_AUTO = 'true'
     reply({ found: true, module: 'Leads', id: 'z1', record: { first_name: 'Ana' } })
     const block = await resolveCustomerContext({
       db: db(),
@@ -249,6 +277,7 @@ describe('resolveCustomerContext', () => {
   })
 
   it('offers the email check once, on the first reply, when the number is hidden', async () => {
+    process.env.CUSTOMER_LOOKUP_AUTO = 'true'
     const first = await resolveCustomerContext({
       db: db(''),
       ...args,
@@ -272,6 +301,7 @@ describe('resolveCustomerContext', () => {
   })
 
   it('does not offer the check when the number is visible', async () => {
+    process.env.CUSTOMER_LOOKUP_AUTO = 'true'
     reply({ found: false })
     const out = await resolveCustomerContext({
       db: db(),

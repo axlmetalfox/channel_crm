@@ -77,6 +77,7 @@ export async function POST(request: Request) {
         nonTextReply: null,
         replyLimitReply: null,
       autoReplySchedule: null,
+      consentNotice: null,
         embeddingsApiKey: null,
       })
     } catch (err) {

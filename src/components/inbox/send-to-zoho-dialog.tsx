@@ -38,6 +38,7 @@ interface LeadForm {
   last_name: string;
   email: string;
   company: string;
+  document_id: string;
   whatsapp_number: string;
   contact_phone: string;
   country: string;
@@ -59,6 +60,7 @@ const EMPTY: LeadForm = {
   last_name: "",
   email: "",
   company: "",
+  document_id: "",
   whatsapp_number: "",
   contact_phone: "",
   country: "",
@@ -244,6 +246,7 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
               {field("last_name", t("lastName"))}
               {field("email", t("email"), "email")}
               {field("company", t("company"))}
+              {field("document_id", t("documentId"))}
               {field("whatsapp_number", t("whatsapp"))}
               {field("contact_phone", t("contactPhone"))}
               {field("country", t("country"))}

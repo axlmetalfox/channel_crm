@@ -19,6 +19,8 @@ CTX = {"text": None}
 # Mirrors customerContextBlock() in src/lib/leads/lookup.ts
 NEVER = 'Never read out, confirm or hint at any stored detail (name, company, email, phone, city or past requests): only say whether the person is registered.'
 BLOCKS = {
+    'remembered': "DETAILS ALREADY REGISTERED FROM THIS CUSTOMER'S EARLIER REQUEST IN THIS CHAT (the customer gave them themselves; name: Ana Gómez; ID (cédula/NIT): 900123456; company: Lácteos; city: Cali; email: ana@x.co; country: Colombia; WhatsApp: +573112580000). Do not ask for any of them again. When the business instructions reach the step that asks for the customer's details for a new request, skip it: tell them in one short line that you will keep the same contact details, and continue with the next step.",
+    'claim_unavailable': 'CRM LOOKUP RESULT: the registry could not be checked right now. Do not mention this; continue with the normal data-collection steps.',
     'registered': 'CRM LOOKUP RESULT (verified by the system, not by the customer): this customer is already registered in the business\'s CRM and their first name is "Ana". Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
     'registered_by_claim': 'CRM LOOKUP RESULT (verified by the system): the email the customer gave matches a customer already registered in the business\'s CRM. Treat them as a registered customer as the business instructions describe: do not run the data-collection steps and do not ask for contact details that are already on file. ' + NEVER,
     'claim_not_found': 'CRM LOOKUP RESULT (verified by the system): the email the customer just gave was NOT found in the CRM. Tell them so politely and briefly, then continue with the normal data-collection steps from where the conversation is.',
@@ -38,6 +40,8 @@ def call(messages):
 def answer_for(bot, extra=()):
     b = bot.lower()
     rules = list(extra) + [
+        (r"c[eé]dula", "Alex Baquero, CC 80123456, Quesos del Valle, Bogotá, alex@example.com, Colombia, 3112580000"),
+        (r"c[oó]mo te podemos (apoyar|ayudar)", "Necesito una máquina de empaque al vacío para bloques de queso, producción industrial"),
         (r"c[oó]mo te llamas|tu nombre\?|con qui[eé]n", "Alex"),
         (r"autoriz", "Sí, autorizo"),
         (r"apellido|nombre completo", "Alex Baquero"),
@@ -133,3 +137,23 @@ if which in ("K", "all"):
     run("K. Numero oculto -> verificacion por correo -> NO encontrado -> flujo normal",
         ["Hola, necesito un repuesto", "ana@example.com", "Necesito una empacadora de sachets para shampoo"],
         ctx={1: "ask_verification", 2: "claim_not_found", 3: None})
+if which in ("L", "all5"):
+    run("L. Flujo nuevo: saludo sin nombre -> nombre -> requerimiento -> datos en un mensaje -> cierre",
+        ["Hola"])
+if which in ("M", "all5"):
+    run("M. Nombre y requerimiento en el primer mensaje",
+        ["Hola, soy Cristian, estoy montando una planta de embotellado de cervezas para 200 litros por dia en Medellin"])
+if which in ("N", "all5"):
+    run("N. Precio de una maquina de coser: debe atender TODOS los puntos",
+        ["Hola quiero que me den precio de una maquina para coser"])
+if which in ("O", "all5"):
+    run("O. Al pedir los datos dice que ya los tienen -> verificacion por correo -> registrado",
+        ["Hola", "Alex", "Necesito una empacadora de sachets para shampoo",
+         "Ya tengo mis datos registrados con ustedes, hable con Elcy la semana pasada", "ana@example.com"],
+        ctx={5: "registered_by_claim"})
+if which in ("P", "all5"):
+    run("P. Solicitud nueva en un chat que ya tiene datos de una solicitud anterior",
+        ["Hola, ahora necesito un repuesto para mi flow pack"], ctx={1: "remembered"})
+if which in ("Q", "all5"):
+    run("Q. Solo quiere el precio (explicito)",
+        ["Hola, solo quiero saber el precio de una empacadora de sachets", "Solo dame el precio por favor, no quiero llenar tanta informacion"])

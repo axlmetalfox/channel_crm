@@ -26,6 +26,7 @@ export const LEAD_EXTRACTION_SCHEMA = {
     last_name: nullableString,
     email: nullableString,
     company: nullableString,
+    document_id: nullableString,
     whatsapp_number: nullableString,
     contact_phone: nullableString,
     country: nullableString,
@@ -39,6 +40,7 @@ export const LEAD_EXTRACTION_SCHEMA = {
     'last_name',
     'email',
     'company',
+    'document_id',
     'whatsapp_number',
     'contact_phone',
     'country',
@@ -55,6 +57,7 @@ export const LEAD_EXTRACTION_PROMPT =
   "The conversation may hold several requests from the same customer (for example a quote, then later a service call): describe only the MOST RECENT request in request_summary and request_type, and reuse the customer's details given earlier in the chat. " +
   'Return only the JSON requested. Use null for any field the customer did not state; never guess or invent values. ' +
   "Split the customer's full name into first_name (given names) and last_name (surnames; in Colombia and most of Latin America people usually have two given names and two surnames, e.g. \"Juan Carlos Pérez Gómez\" -> first_name \"Juan Carlos\", last_name \"Pérez Gómez\"). " +
+  'document_id is the customer\'s national id (cédula) or company tax id (NIT) exactly as written, digits and verification digit included. ' +
   'whatsapp_number is the number the customer confirmed as their WhatsApp, in international format with "+" and country code. ' +
   'contact_phone is their phone for a call: if they said it is the same as the WhatsApp number, repeat the WhatsApp number; otherwise the number they gave. ' +
   'country and city as the customer wrote them. ' +
@@ -67,6 +70,8 @@ export interface Lead {
   last_name: string | null
   email: string | null
   company: string | null
+  /** Cédula or NIT. */
+  document_id: string | null
   whatsapp_number: string | null
   contact_phone: string | null
   country: string | null
@@ -74,6 +79,25 @@ export interface Lead {
   request_summary: string
   request_type: LeadRequestType
   consent_given: boolean
+}
+
+/**
+ * A Colombian mobile number typed without the country code (ten digits,
+ * starting with 3) gets the 57 in front, so it reaches the CRM in the same
+ * international format as every other number.
+ */
+function withCountryCode(value: unknown, country: string | null): unknown {
+  if (typeof value !== 'string' || !country) return value
+  const isColombia = country
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase() === 'colombia'
+  const digits = value.replace(/\D/g, '')
+  if (isColombia && !value.trim().startsWith('+') && digits.length === 10 && digits.startsWith('3')) {
+    return `+57${digits}`
+  }
+  return value
 }
 
 /**
@@ -87,14 +111,16 @@ export function parseLead(raw: unknown): Lead | null {
   const summary = cleanText(r.request_summary)
   if (!requestType || !summary) return null
 
+  const country = cleanText(r.country)
   return {
     first_name: cleanText(r.first_name),
     last_name: cleanText(r.last_name),
     email: normalizeEmail(r.email),
     company: cleanText(r.company),
-    whatsapp_number: normalizeE164(r.whatsapp_number),
-    contact_phone: normalizeContactPhone(r.contact_phone),
-    country: cleanText(r.country),
+    document_id: cleanText(r.document_id),
+    whatsapp_number: normalizeE164(withCountryCode(r.whatsapp_number, country)),
+    contact_phone: normalizeContactPhone(withCountryCode(r.contact_phone, country)),
+    country,
     city: cleanText(r.city),
     request_summary: summary,
     request_type: requestType,

@@ -31,7 +31,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, auto_reply_schedule, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_enabled, lead_capture_enabled, non_text_reply, reply_limit_reply, consent_notice, auto_reply_schedule, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -136,6 +136,7 @@ export async function POST(request: Request) {
     }
     const nonTextReply = fixedReply(body.non_text_reply)
     const replyLimitReply = fixedReply(body.reply_limit_reply)
+    const consentNotice = fixedReply(body.consent_notice)
 
     // Absent = unchanged; null = always on duty; an object = the weekly windows.
     let schedule: AutoReplySchedule | null | undefined
@@ -204,6 +205,7 @@ export async function POST(request: Request) {
           nonTextReply: null,
           replyLimitReply: null,
           autoReplySchedule: null,
+          consentNotice: null,
           embeddingsApiKey: null,
         })
       } catch (err) {
@@ -251,6 +253,7 @@ export async function POST(request: Request) {
     if (leadCaptureProvided) shared.lead_capture_enabled = leadCaptureEnabled
     if (nonTextReply !== undefined) shared.non_text_reply = nonTextReply
     if (replyLimitReply !== undefined) shared.reply_limit_reply = replyLimitReply
+    if (consentNotice !== undefined) shared.consent_notice = consentNotice
     if (schedule !== undefined) shared.auto_reply_schedule = schedule
     if (rawEmbeddingsKey) {
       shared.embeddings_api_key = encrypt(rawEmbeddingsKey)

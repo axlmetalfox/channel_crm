@@ -10,6 +10,8 @@ const h = vi.hoisted(() => ({
   engineSendText: vi.fn(),
   captureLead: vi.fn(),
   hasNewer: vi.fn(),
+  hasBotText: vi.fn(),
+  previousLead: vi.fn(),
   setTag: vi.fn(),
   repliesSince: vi.fn(),
   state: {
@@ -28,9 +30,14 @@ vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('@/lib/leads/capture', () => ({ captureLead: h.captureLead }))
+vi.mock('@/lib/leads/lookup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/leads/lookup')>()),
+  previousLeadDetails: h.previousLead,
+}))
 vi.mock('./tags', () => ({ setOfficeHoursTag: h.setTag }))
 vi.mock('./guards', () => ({
   hasNewerCustomerText: h.hasNewer,
+  hasBotMessageWithText: h.hasBotText,
   aiRepliesSince: h.repliesSince,
   sleep: () => Promise.resolve(),
 }))
@@ -105,6 +112,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     nonTextReply: null,
     replyLimitReply: null,
     autoReplySchedule: null,
+    consentNotice: null,
     embeddingsApiKey: null,
     ...overrides,
   }
@@ -129,6 +137,8 @@ beforeEach(() => {
   h.hasNewer.mockResolvedValue(false)
   h.repliesSince.mockResolvedValue(0)
   h.setTag.mockResolvedValue(undefined)
+  h.hasBotText.mockResolvedValue(false)
+  h.previousLead.mockResolvedValue(null)
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
@@ -529,5 +539,66 @@ describe('dispatchInboundToAiReply — schedule, bursts and the daily limit', ()
     h.state.lastBot = { created_at: new Date().toISOString(), content_text: fallbackText('replyLimit', null) }
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+})
+
+describe('data-processing notice first, and what the chat already told us', () => {
+  const NOTICE = 'Al continuar, confirmas que conoces y aceptas la Política de Tratamiento de Datos Personales de INTERTEC SAS.'
+
+  it('sends the notice as the first message, then the agent\'s reply', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ consentNotice: NOTICE }))
+    await dispatchInboundToAiReply(ARGS)
+    const texts = h.engineSendText.mock.calls.map((c) => c[0].text)
+    expect(texts).toEqual([NOTICE, 'Hello!'])
+    // The model still sees the customer's message last: the notice was not added to its context.
+    expect(h.generateReply.mock.calls[0][0].messages).toEqual([{ role: 'user', content: 'hi' }])
+  })
+
+  it('does not repeat the notice once the conversation has had it', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ consentNotice: NOTICE }))
+    h.hasBotText.mockResolvedValue(true)
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText.mock.calls.map((c) => c[0].text)).toEqual(['Hello!'])
+  })
+
+  it('sends no notice when the account has none', async () => {
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.hasBotText).not.toHaveBeenCalled()
+    expect(h.engineSendText.mock.calls.map((c) => c[0].text)).toEqual(['Hello!'])
+  })
+
+  it('still replies when the notice cannot be sent', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ consentNotice: NOTICE }))
+    h.engineSendText.mockRejectedValueOnce(new Error('send failed'))
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText.mock.calls.map((c) => c[0].text)).toEqual([NOTICE, 'Hello!'])
+  })
+
+  it('sends the notice before the "text only" reply too', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ consentNotice: NOTICE }))
+    await dispatchNonTextAutoReply(ARGS)
+    const texts = h.engineSendText.mock.calls.map((c) => c[0].text)
+    expect(texts[0]).toBe(NOTICE)
+    expect(texts[1]).toBe(fallbackText('nonText', null))
+  })
+
+  it('tells the model which details this customer already gave, so it does not ask again', async () => {
+    h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
+    h.previousLead.mockResolvedValue({
+      first_name: 'Ana',
+      last_name: 'Gómez',
+      email: 'ana@x.co',
+      company: 'Lácteos',
+      document_id: '900123456',
+      whatsapp_number: '+573112580000',
+      country: 'Colombia',
+      city: 'Cali',
+    })
+    await dispatchInboundToAiReply(ARGS)
+    const systemPrompt = h.generateReply.mock.calls[0][0].systemPrompt as string
+    expect(systemPrompt).toContain('ALREADY REGISTERED FROM THIS CUSTOMER')
+    expect(systemPrompt).toContain('Ana Gómez')
+    expect(systemPrompt).toContain('900123456')
+    expect(systemPrompt).toMatch(/Do not ask for any of them again/)
   })
 })

@@ -5,7 +5,13 @@ import { AiError, type AiConfig, type ChatMessage } from '@/lib/ai/types'
 import { deliverWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractLead } from './extract'
 import { judgeLead, type Lead } from './schema'
-import { fillLeadFromRecord, type CrmMatch } from './lookup'
+import {
+  fillLeadFromRecord,
+  fillLeadFromRemembered,
+  previousLeadDetails,
+  type CrmMatch,
+} from './lookup'
+import { consentFromNotice } from './consent'
 import { reportLeadConversion } from './conversion'
 
 // ============================================================
@@ -64,7 +70,7 @@ export interface LeadPayload {
   /** The number the conversation runs on, as WhatsApp reports it. */
   channel_phone: string | null
   lead: Omit<Lead, 'consent_given'>
-  consent: { given: true; captured_at: string }
+  consent: { given: true; captured_at: string; method: 'notice' | 'chat' }
   /** Set when the customer was already registered in the CRM. */
   existing_record: { module: string; id: string } | null
   /** The ad or post the customer's chat started from, when it did. */
@@ -327,6 +333,15 @@ async function buildPayload(
     lead = fillLeadFromRecord(lead, crm.record, channelPhone)
   }
 
+  // Details the customer gave for an earlier request in this same chat.
+  const previous = await previousLeadDetails(db, row.conversation_id)
+  if (previous) lead = fillLeadFromRemembered(lead, previous)
+
+  // The account's data notice was sent first and the customer carried on:
+  // that is the authorization, whatever the model read in the chat.
+  const noticeConsent = await consentFromNotice(db, row.conversation_id, config.consentNotice)
+  if (noticeConsent.given) lead = { ...lead, consent_given: true }
+
   const verdict = judgeLead(lead)
   if (verdict === 'no_consent') {
     return {
@@ -354,6 +369,7 @@ async function buildPayload(
       last_name: lead.last_name,
       email: lead.email,
       company: lead.company,
+      document_id: lead.document_id,
       whatsapp_number: lead.whatsapp_number,
       // No separate contact phone means the WhatsApp number is it.
       contact_phone: lead.contact_phone ?? lead.whatsapp_number,
@@ -362,7 +378,11 @@ async function buildPayload(
       request_summary: lead.request_summary,
       request_type: lead.request_type,
     },
-    consent: { given: true, captured_at: row.created_at },
+    consent: {
+      given: true,
+      captured_at: noticeConsent.at ?? row.created_at,
+      method: noticeConsent.given ? 'notice' : 'chat',
+    },
     existing_record:
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution,

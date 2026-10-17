@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   logAiUsage: vi.fn(),
   loadAiConfig: vi.fn(),
   reportConversion: vi.fn(),
+  consent: vi.fn(),
+  previousLead: vi.fn(),
   state: {
     insertError: null as { code: string } | null,
     claimOk: true,
@@ -28,6 +30,11 @@ vi.mock('@/lib/webhooks/deliver', () => ({ deliverWebhookEvent: h.deliver }))
 vi.mock('@/lib/ai/usage', () => ({ logAiUsage: h.logAiUsage }))
 vi.mock('@/lib/ai/config', () => ({ loadAiConfig: h.loadAiConfig }))
 vi.mock('./conversion', () => ({ reportLeadConversion: h.reportConversion }))
+vi.mock('./consent', () => ({ consentFromNotice: h.consent }))
+vi.mock('./lookup', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./lookup')>()),
+  previousLeadDetails: h.previousLead,
+}))
 
 import { captureLead, retryLeadIntakes } from './capture'
 
@@ -100,6 +107,7 @@ const LEAD: Lead = {
   last_name: 'Pérez',
   email: 'juan@x.co',
   company: 'Lácteos',
+  document_id: null,
   whatsapp_number: '+573112580000',
   contact_phone: null,
   country: 'Colombia',
@@ -135,6 +143,8 @@ beforeEach(() => {
   h.extractLead.mockResolvedValue({ lead: LEAD, usage: null })
   h.deliver.mockResolvedValue({ endpoints: 1, delivered: 1 })
   h.reportConversion.mockResolvedValue({ status: 'sent', at: '2026-10-16T05:00:00.000Z' })
+  h.consent.mockResolvedValue({ given: false, at: null })
+  h.previousLead.mockResolvedValue(null)
 })
 
 describe('captureLead', () => {
@@ -287,6 +297,52 @@ describe('captureLead', () => {
   it('sends attribution as null for an organic chat', async () => {
     await captureLead({ db: fakeDb(), ...ARGS })
     expect(h.deliver.mock.calls[0][3].attribution).toBeNull()
+  })
+
+  it('counts continuing after the data notice as the authorization', async () => {
+    h.extractLead.mockResolvedValue({ lead: { ...LEAD, consent_given: false }, usage: null })
+    h.consent.mockResolvedValue({ given: true, at: '2026-10-10T11:58:00.000Z' })
+    await captureLead({ db: fakeDb(), ...ARGS, config: { ...CONFIG, consentNotice: 'Al continuar…' } as AiConfig })
+    const payload = h.deliver.mock.calls[0][3]
+    expect(payload.consent).toEqual({
+      given: true,
+      captured_at: '2026-10-10T11:58:00.000Z',
+      method: 'notice',
+    })
+    expect(lastStatus()).toMatchObject({ status: 'delivered' })
+    expect(h.consent).toHaveBeenCalledWith(expect.anything(), 'conv-1', 'Al continuar…')
+  })
+
+  it('still needs explicit consent when there was no notice in the chat', async () => {
+    h.extractLead.mockResolvedValue({ lead: { ...LEAD, consent_given: false }, usage: null })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.deliver).not.toHaveBeenCalled()
+    expect(lastStatus()).toMatchObject({ status: 'no_consent' })
+  })
+
+  it('completes a new request with the details given for an earlier one in the same chat', async () => {
+    h.extractLead.mockResolvedValue({
+      lead: { ...LEAD, first_name: null, last_name: null, email: null, company: null, city: null, document_id: null },
+      usage: null,
+    })
+    h.previousLead.mockResolvedValue({
+      first_name: 'Ana',
+      last_name: 'Gómez',
+      email: 'ana@x.co',
+      company: 'Lácteos',
+      document_id: '900123456',
+      whatsapp_number: '+573112580000',
+      country: 'Colombia',
+      city: 'Cali',
+    })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(h.deliver.mock.calls[0][3].lead).toMatchObject({
+      first_name: 'Ana',
+      last_name: 'Gómez',
+      email: 'ana@x.co',
+      document_id: '900123456',
+      city: 'Cali',
+    })
   })
 
   it('sends existing_record as null for a customer the CRM does not know', async () => {

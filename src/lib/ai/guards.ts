@@ -49,4 +49,21 @@ export async function aiRepliesSince(
   return count ?? 0
 }
 
+/** True when we already sent this exact text in the conversation. */
+export async function hasBotMessageWithText(
+  db: SupabaseClient,
+  conversationId: string,
+  text: string,
+): Promise<boolean> {
+  const { data } = await db
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'bot')
+    .eq('content_text', text)
+    .limit(1)
+    .maybeSingle()
+  return !!data
+}
+
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
