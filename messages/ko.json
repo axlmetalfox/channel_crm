@@ -320,6 +320,10 @@
     "sidebar": {
       "contactInfo": "연락처 정보",
       "tags": "태그",
+      "origin": "유입 경로",
+      "originAd": "Meta 광고",
+      "originPost": "Meta 게시물",
+      "originDirect": "광고 없음: 직접 메시지",
       "notes": "메모",
       "deals": "딜",
       "noTags": "태그 없음",

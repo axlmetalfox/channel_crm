@@ -157,6 +157,18 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
+/** Where a chat came from when it started from a click-to-WhatsApp ad or post. */
+export interface ConversationAttribution {
+  source_type: string | null;
+  source_id: string | null;
+  source_url: string | null;
+  headline: string | null;
+  body: string | null;
+  media_type: string | null;
+  ctwa_clid: string | null;
+  captured_at: string;
+}
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -181,6 +193,8 @@ export interface Conversation {
   ai_autoreply_disabled?: boolean;
   ai_reply_count?: number;
   ai_handoff_summary?: string | null;
+  /** Set when the chat started from a Meta ad / post; null = a direct message. */
+  attribution?: ConversationAttribution | null;
 }
 
 // ============================================================

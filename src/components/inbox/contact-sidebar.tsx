@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, ConversationAttribution, Deal, ContactNote, Tag } from "@/types";
 import {
   Phone,
   Mail,
@@ -15,6 +15,7 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,9 +24,11 @@ import { useTranslations } from "next-intl";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  /** The Meta ad / post this chat came from, when it came from one. */
+  attribution?: ConversationAttribution | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, attribution = null }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -176,6 +179,43 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Where the chat came from */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <Megaphone className="h-3 w-3" />
+              {tSidebar("origin")}
+            </div>
+            <div className="mt-2 space-y-1 px-1 text-xs">
+              {attribution ? (
+                <>
+                  <p className="font-medium text-foreground">
+                    {attribution.source_type === "post"
+                      ? tSidebar("originPost")
+                      : tSidebar("originAd")}
+                  </p>
+                  {attribution.headline && (
+                    <p className="text-muted-foreground">{attribution.headline}</p>
+                  )}
+                  {attribution.source_url && /^https?:\/\//i.test(attribution.source_url) && (
+                    <a
+                      href={attribution.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block truncate text-primary hover:underline"
+                    >
+                      {attribution.source_url}
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p className="text-muted-foreground">{tSidebar("originDirect")}</p>
+              )}
+            </div>
           </div>
 
           {/* Divider */}

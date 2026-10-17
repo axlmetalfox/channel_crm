@@ -320,6 +320,10 @@
     "sidebar": {
       "contactInfo": "Información del contacto",
       "tags": "Etiquetas",
+      "origin": "Origen",
+      "originAd": "Anuncio de Meta",
+      "originPost": "Publicación de Meta",
+      "originDirect": "Sin anuncio: escribió directamente",
       "notes": "Notas",
       "deals": "Negocios",
       "noTags": "Sin etiquetas",
