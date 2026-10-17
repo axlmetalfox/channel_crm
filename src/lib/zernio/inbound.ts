@@ -6,6 +6,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply, dispatchNonTextAutoReply } from '@/lib/ai/auto-reply'
 import { isSocialShareOnly } from '@/lib/ai/social-links'
+import { mirrorInboundMedia, type MirrorStorage } from '@/lib/whatsapp/mirror-inbound-media'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import type { ZernioConfig } from './config'
 import type { ZernioInbound, ZernioStatus } from './events'
@@ -220,6 +221,29 @@ export async function processZernioInbound(
     return
   }
   if (!inserted || inserted.length === 0) return // replay
+
+  // A photo, video, voice note or document: Zernio's link for it needs our API
+  // key, so the team's browsers cannot open it. Copy it into our own
+  // storage and point the message there (best effort: if it fails, the
+  // original link stays).
+  if (msg.mediaUrl && msg.contentType !== 'text') {
+    const mirrored = await mirrorInboundMedia({
+      storage: (db as unknown as { storage: MirrorStorage }).storage,
+      accountId: config.accountId,
+      mediaId: String(msg.messageId).replace(/[^A-Za-z0-9]/g, '').slice(0, 40) || 'media',
+      downloadUrl: msg.mediaUrl,
+      accessToken: config.apiKey,
+      mimeType: msg.mimeType,
+      fileName: msg.fileName,
+      messageTimestamp: msg.sentAt ? Math.floor(Date.parse(msg.sentAt) / 1000) : null,
+    }).catch(() => null)
+    if (mirrored) {
+      await db
+        .from('messages')
+        .update({ media_url: mirrored })
+        .eq('id', (inserted[0] as { id: string }).id)
+    }
+  }
 
   // First message after an ad click: remember which ad it was. A later
   // click on another ad replaces it (the newest source is the one a new

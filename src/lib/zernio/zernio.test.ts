@@ -89,6 +89,25 @@ describe('parseZernioEvent', () => {
     expect(ev).toMatchObject({ kind: 'message', phone: null, username: 'ana.g', name: 'Ana' })
   })
 
+  it('reads a document (Zernio calls it a file) with its name and type', () => {
+    const ev = parseZernioEvent({
+      ...received,
+      message: {
+        ...received.message,
+        text: null,
+        attachments: [
+          { type: 'file', url: 'https://zernio.com/m/1', mimeType: 'application/pdf', filename: 'cotizacion.pdf' },
+        ],
+      },
+    })
+    expect(ev).toMatchObject({
+      contentType: 'document',
+      mediaUrl: 'https://zernio.com/m/1',
+      mimeType: 'application/pdf',
+      fileName: 'cotizacion.pdf',
+    })
+  })
+
   it('reads the ad referral Zernio passes in metadata.referral', () => {
     const ev = parseZernioEvent({
       ...received,

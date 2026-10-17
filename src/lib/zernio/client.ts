@@ -116,6 +116,46 @@ export async function sendZernioText(args: {
   return { messageId }
 }
 
+/**
+ * Send a file (photo, video, audio, document) into a Zernio conversation.
+ * `attachmentUrl` must be publicly reachable: Zernio downloads it. The
+ * optional text becomes the caption. Returns Zernio's message id.
+ */
+export async function sendZernioAttachment(args: {
+  apiKey: string
+  accountId: string
+  conversationId: string
+  attachmentUrl: string
+  attachmentType: 'image' | 'video' | 'audio' | 'file'
+  /** Caption (image, video, document). */
+  text?: string | null
+  /** Document file name shown to the recipient. */
+  attachmentName?: string | null
+  /** Audio only: send as a WhatsApp voice note (needs .ogg / Opus). */
+  voiceNote?: boolean
+  idempotencyKey?: string
+}): Promise<{ messageId: string }> {
+  const res = await zernioRequest<{ data?: { messageId?: string } }>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: `/inbox/conversations/${encodeURIComponent(args.conversationId)}/messages`,
+    body: {
+      accountId: args.accountId,
+      attachmentUrl: args.attachmentUrl,
+      attachmentType: args.attachmentType,
+      ...(args.text ? { message: args.text } : {}),
+      ...(args.attachmentType === 'file' && args.attachmentName ? { attachmentName: args.attachmentName } : {}),
+      ...(args.attachmentType === 'audio' && args.voiceNote ? { voiceNote: true } : {}),
+    },
+    idempotencyKey: args.idempotencyKey,
+  })
+  const messageId = res.data?.messageId
+  if (!messageId) {
+    throw new ZernioError('Zernio accepted the message but returned no id.', 502)
+  }
+  return { messageId }
+}
+
 export interface ZernioAccountHealth {
   accountId: string
   platform: string | null

@@ -3,11 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const h = vi.hoisted(() => ({
   loadZernioConfig: vi.fn(),
   sendTextViaZernio: vi.fn(),
+  sendMedia: vi.fn(),
   pausedFlows: [] as string[],
 }))
 
 vi.mock('@/lib/zernio/config', () => ({ loadZernioConfig: h.loadZernioConfig }))
-vi.mock('@/lib/zernio/send', () => ({ sendTextViaZernio: h.sendTextViaZernio }))
+vi.mock('@/lib/zernio/send', () => ({ sendTextViaZernio: h.sendTextViaZernio, sendMediaViaZernio: h.sendMedia }))
 vi.mock('@/lib/flows/admin-client', () => ({
   supabaseAdmin: () => ({
     from: () => {
@@ -44,6 +45,7 @@ beforeEach(() => {
   h.pausedFlows = []
   h.loadZernioConfig.mockResolvedValue({ apiKey: 'sk_x', zernioAccountId: 'zacc' })
   h.sendTextViaZernio.mockResolvedValue({ whatsapp_message_id: 'zmsg-9', message_id: 'm-9' })
+  h.sendMedia.mockResolvedValue({ whatsapp_message_id: 'zmsg-img', message_id: 'm-img' })
 })
 
 describe('sendMessageToConversation on an account that uses Zernio', () => {
@@ -57,15 +59,40 @@ describe('sendMessageToConversation on an account that uses Zernio', () => {
     expect(h.pausedFlows).toEqual(['ct-1'])
   })
 
-  it('says plainly that only text is supported for now', async () => {
+  it('sends a photo, video, audio file or document through Zernio', async () => {
+    for (const kind of ['image', 'video', 'audio', 'document']) {
+      h.sendMedia.mockClear()
+      const out = await sendMessageToConversation(db, 'acct-1', {
+        conversationId: 'cv-1',
+        messageType: kind,
+        mediaUrl: 'https://files.example/chat-media/account-acct-1/x.bin',
+        contentText: 'Mira la máquina',
+        filename: 'catalogo.pdf',
+      })
+      expect(out).toEqual({ messageId: 'm-img', whatsappMessageId: 'zmsg-img' })
+      expect(h.sendMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind,
+          mediaUrl: 'https://files.example/chat-media/account-acct-1/x.bin',
+          caption: 'Mira la máquina',
+          filename: 'catalogo.pdf',
+          senderType: 'agent',
+        }),
+      )
+    }
+    expect(h.pausedFlows.length).toBeGreaterThan(0)
+  })
+
+  it('still refuses templates and buttons, and says so plainly', async () => {
     await expect(
       sendMessageToConversation(db, 'acct-1', {
         conversationId: 'cv-1',
-        messageType: 'image',
-        mediaUrl: 'https://x/y.png',
+        messageType: 'template',
+        templateName: 'saludo',
       }),
-    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/only text/i) })
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/not templates/i) })
     expect(h.sendTextViaZernio).not.toHaveBeenCalled()
+    expect(h.sendMedia).not.toHaveBeenCalled()
   })
 
   it('turns a Zernio rejection (for example the 24h window) into a readable 400', async () => {

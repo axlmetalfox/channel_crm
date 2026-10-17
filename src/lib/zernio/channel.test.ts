@@ -4,12 +4,14 @@ import type { ZernioInbound } from './events'
 
 const h = vi.hoisted(() => ({
   sendZernioText: vi.fn(),
+  sendZernioAttachment: vi.fn(),
   findExistingContact: vi.fn(),
   dispatchFlows: vi.fn(),
   runAutomations: vi.fn(),
   dispatchAi: vi.fn(),
   dispatchNonText: vi.fn(),
   dispatchWebhook: vi.fn(),
+  mirror: vi.fn(),
   state: {
     conversation: null as Record<string, unknown> | null,
     existingConversation: true,
@@ -21,7 +23,7 @@ const h = vi.hoisted(() => ({
   },
 }))
 
-vi.mock('./client', () => ({ sendZernioText: h.sendZernioText }))
+vi.mock('./client', () => ({ sendZernioText: h.sendZernioText, sendZernioAttachment: h.sendZernioAttachment }))
 vi.mock('@/lib/contacts/dedupe', () => ({
   findExistingContact: h.findExistingContact,
   isUniqueViolation: () => false,
@@ -33,8 +35,9 @@ vi.mock('@/lib/ai/auto-reply', () => ({
   dispatchNonTextAutoReply: h.dispatchNonText,
 }))
 vi.mock('@/lib/webhooks/deliver', () => ({ dispatchWebhookEvent: h.dispatchWebhook }))
+vi.mock('@/lib/whatsapp/mirror-inbound-media', () => ({ mirrorInboundMedia: h.mirror }))
 
-import { sendTextViaZernio } from './send'
+import { sendMediaViaZernio, sendTextViaZernio } from './send'
 import { processZernioInbound, processZernioStatus } from './inbound'
 
 const CONFIG: ZernioConfig = {
@@ -126,11 +129,13 @@ beforeEach(() => {
   h.state.statusRow = null
   h.state.ops = []
   h.sendZernioText.mockResolvedValue({ messageId: 'zmsg-1' })
+  h.sendZernioAttachment.mockResolvedValue({ messageId: 'zmsg-att' })
   h.findExistingContact.mockResolvedValue({ id: 'ct-1', phone: '573112580000', name: 'Ana' })
   h.dispatchFlows.mockResolvedValue({ consumed: false })
   h.runAutomations.mockResolvedValue(undefined)
   h.dispatchAi.mockResolvedValue(undefined)
   h.dispatchWebhook.mockResolvedValue(undefined)
+  h.mirror.mockResolvedValue(null)
 })
 
 describe('sendTextViaZernio', () => {
@@ -164,6 +169,71 @@ describe('sendTextViaZernio', () => {
   })
 })
 
+describe('sendMediaViaZernio', () => {
+  const send = (over: Record<string, unknown>) =>
+    sendMediaViaZernio({
+      db: fakeDb(),
+      config: CONFIG,
+      conversationId: 'cv-1',
+      kind: 'image',
+      mediaUrl: 'https://files.example/chat-media/account-acct-1/foto.jpg',
+      ...over,
+    } as Parameters<typeof sendMediaViaZernio>[0])
+
+  it('sends a photo with its caption and records it as an agent message with the file', async () => {
+    const out = await send({ kind: 'image', caption: 'Así queda el empaque' })
+    expect(out).toEqual({ whatsapp_message_id: 'zmsg-att', message_id: 'm-db' })
+    expect(h.sendZernioAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'zconv-1',
+        attachmentType: 'image',
+        attachmentUrl: 'https://files.example/chat-media/account-acct-1/foto.jpg',
+        text: 'Así queda el empaque',
+        voiceNote: false,
+      }),
+    )
+    expect(written('messages', 'insert')[0].values).toMatchObject({
+      sender_type: 'agent',
+      content_type: 'image',
+      content_text: 'Así queda el empaque',
+      media_url: 'https://files.example/chat-media/account-acct-1/foto.jpg',
+      message_id: 'zmsg-att',
+    })
+  })
+
+  it('sends a document as a file with its name, and keeps the name as the shown text', async () => {
+    await send({
+      kind: 'document',
+      mediaUrl: 'https://files.example/chat-media/account-acct-1/cot.pdf',
+      filename: 'Cotizacion.pdf',
+    })
+    expect(h.sendZernioAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentType: 'file', attachmentName: 'Cotizacion.pdf' }),
+    )
+    expect(written('messages', 'insert')[0].values).toMatchObject({
+      content_type: 'document',
+      content_text: 'Cotizacion.pdf',
+    })
+  })
+
+  it('sends a recorded .ogg as a voice note, but an mp3 as a plain audio file, never with a caption', async () => {
+    await send({ kind: 'audio', mediaUrl: 'https://files.example/chat-media/account-acct-1/nota.ogg', caption: 'x' })
+    expect(h.sendZernioAttachment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ attachmentType: 'audio', voiceNote: true, text: null }),
+    )
+    await send({ kind: 'audio', mediaUrl: 'https://files.example/chat-media/account-acct-1/cancion.mp3' })
+    expect(h.sendZernioAttachment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ attachmentType: 'audio', voiceNote: false }),
+    )
+  })
+
+  it('refuses a thread Zernio has never written to', async () => {
+    h.state.conversation = { id: 'cv-1', zernio_conversation_id: null }
+    await expect(send({})).rejects.toThrow(/no Zernio thread/)
+    expect(h.sendZernioAttachment).not.toHaveBeenCalled()
+  })
+})
+
 const INBOUND: ZernioInbound = {
   kind: 'message',
   eventId: 'evt-1',
@@ -176,6 +246,8 @@ const INBOUND: ZernioInbound = {
   text: 'Hola',
   contentType: 'text',
   mediaUrl: null,
+  mimeType: null,
+  fileName: null,
   sentAt: '2026-10-13T20:00:00Z',
   referral: null,
 }
@@ -333,6 +405,42 @@ describe('processZernioInbound', () => {
     })
     expect(h.dispatchAi).toHaveBeenCalled()
     expect(written('conversations', 'update').some((o) => o.values?.status === 'closed')).toBe(false)
+  })
+
+  it('copies a photo or voice note into our storage so the team can open it', async () => {
+    h.mirror.mockResolvedValue('https://files.example/chat-media/account-acct-1/inbound/zmsg-in-image.jpg')
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      text: null,
+      contentType: 'image',
+      mediaUrl: 'https://zernio.com/api/v1/whatsapp/media/123?accountId=zacc',
+      mimeType: 'image/jpeg',
+    })
+    expect(h.mirror).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'acct-1',
+        downloadUrl: 'https://zernio.com/api/v1/whatsapp/media/123?accountId=zacc',
+        accessToken: 'sk_x',
+        mimeType: 'image/jpeg',
+      }),
+    )
+    const updated = written('messages', 'update').find((o) => o.values?.media_url)
+    expect(updated?.values?.media_url).toContain('chat-media')
+  })
+
+  it('keeps the original link when the copy fails, and does not copy plain text', async () => {
+    await processZernioInbound(fakeDb(), CONFIG, {
+      ...INBOUND,
+      text: null,
+      contentType: 'audio',
+      mediaUrl: 'https://zernio.com/api/v1/whatsapp/media/9?accountId=zacc',
+    })
+    expect(h.mirror).toHaveBeenCalledTimes(1)
+    expect(written('messages', 'update').some((o) => o.values?.media_url)).toBe(false)
+
+    h.mirror.mockClear()
+    await processZernioInbound(fakeDb(), CONFIG, { ...INBOUND, eventId: 'e3', messageId: 'zmsg-in-3' })
+    expect(h.mirror).not.toHaveBeenCalled()
   })
 
   it('keeps the non-text reply for messages without text only', async () => {

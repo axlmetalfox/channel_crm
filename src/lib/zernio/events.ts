@@ -46,6 +46,9 @@ export interface ZernioInbound {
   text: string | null
   contentType: 'text' | 'image' | 'document' | 'audio' | 'video'
   mediaUrl: string | null
+  /** MIME type and file name of the attachment, when Zernio knows them. */
+  mimeType: string | null
+  fileName: string | null
   sentAt: string | null
   /** Set on the first message after an ad click, else null. */
   referral: ZernioReferral | null
@@ -63,7 +66,7 @@ export interface ZernioStatus {
 
 export type ZernioEvent = ZernioInbound | ZernioStatus
 
-const ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'document'])
+const ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'document', 'file'])
 
 /**
  * The shape of a payload — field names and value types, never values —
@@ -110,9 +113,11 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
         ? message.attachments[0]
         : null
     const attType = str(attachment?.type)
-    const contentType =
+    const contentType: ZernioInbound['contentType'] =
       !text && attType && ATTACHMENT_TYPES.has(attType)
-        ? (attType as ZernioInbound['contentType'])
+        ? attType === 'file'
+          ? 'document' // Zernio calls a document a "file"
+          : (attType as ZernioInbound['contentType'])
         : 'text'
 
     const metadata = isObj(payload.metadata) ? payload.metadata : null
@@ -141,6 +146,8 @@ export function parseZernioEvent(payload: unknown): ZernioEvent | null {
       text,
       contentType,
       mediaUrl: contentType === 'text' ? null : str(attachment?.url),
+      mimeType: contentType === 'text' ? null : str(attachment?.mimeType),
+      fileName: contentType === 'text' ? null : str(attachment?.filename),
       sentAt: str(message.sentAt),
       referral,
     }

@@ -37,7 +37,7 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { loadZernioConfig } from '@/lib/zernio/config';
-import { sendTextViaZernio } from '@/lib/zernio/send';
+import { sendMediaViaZernio, sendTextViaZernio, type ZernioMediaKind } from '@/lib/zernio/send';
 import { ZernioError } from '@/lib/zernio/client';
 import {
   sanitizePhoneForMeta,
@@ -244,21 +244,33 @@ export async function sendMessageToConversation(
   // for now.
   const zernio = await loadZernioConfig(supabaseAdmin(), accountId);
   if (zernio) {
-    if (messageType !== 'text') {
+    const isFile = (MEDIA_KINDS as readonly string[]).includes(messageType);
+    if (messageType !== 'text' && !isFile) {
       throw new SendMessageError(
         'bad_request',
-        'This account sends through Zernio, which supports only text messages from the inbox for now.',
+        'This account sends through Zernio, which supports text and files (photos, videos, audio, documents) from the inbox, not templates or buttons yet.',
         400
       );
     }
     try {
-      const sent = await sendTextViaZernio({
-        db: supabaseAdmin(),
-        config: zernio,
-        conversationId,
-        text: contentText as string,
-        senderType: 'agent',
-      });
+      const sent = isFile
+        ? await sendMediaViaZernio({
+            db: supabaseAdmin(),
+            config: zernio,
+            conversationId,
+            kind: messageType as ZernioMediaKind,
+            mediaUrl: mediaUrl as string,
+            caption: contentText,
+            filename,
+            senderType: 'agent',
+          })
+        : await sendTextViaZernio({
+            db: supabaseAdmin(),
+            config: zernio,
+            conversationId,
+            text: contentText as string,
+            senderType: 'agent',
+          });
       await pauseFlowsForAgentReply(accountId, contact?.id);
       return { messageId: sent.message_id, whatsappMessageId: sent.whatsapp_message_id };
     } catch (err) {
