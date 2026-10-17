@@ -582,7 +582,7 @@ describe('data-processing notice first, and what the chat already told us', () =
     expect(texts[1]).toBe(fallbackText('nonText', null))
   })
 
-  it('tells the model which details this customer already gave, so it does not ask again', async () => {
+  it('tells the model details are on file so it does not ask again, without showing any of them', async () => {
     h.loadAiConfig.mockResolvedValue(aiConfig({ leadCaptureEnabled: true }))
     h.previousLead.mockResolvedValue({
       first_name: 'Ana',
@@ -596,9 +596,11 @@ describe('data-processing notice first, and what the chat already told us', () =
     })
     await dispatchInboundToAiReply(ARGS)
     const systemPrompt = h.generateReply.mock.calls[0][0].systemPrompt as string
-    expect(systemPrompt).toContain('ALREADY REGISTERED FROM THIS CUSTOMER')
-    expect(systemPrompt).toContain('Ana Gómez')
-    expect(systemPrompt).toContain('900123456')
-    expect(systemPrompt).toMatch(/Do not ask for any of them again/)
+    expect(systemPrompt).toContain('ALREADY HAS CONTACT DETAILS ON FILE')
+    expect(systemPrompt).toMatch(/Do not ask for them again/)
+    // Confidential: none of the stored values reaches the model.
+    for (const secret of ['Ana', 'Gómez', '900123456', 'ana@x.co', 'Lácteos', '+573112580000']) {
+      expect(systemPrompt).not.toContain(secret)
+    }
   })
 })

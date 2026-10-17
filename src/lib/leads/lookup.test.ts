@@ -7,6 +7,8 @@ import {
   lookupConfigured,
   lookupCustomer,
   matchIsStale,
+  MAX_VERIFICATIONS_PER_CONVERSATION,
+  rememberedDetailsBlock,
   resolveCustomerContext,
   verificationRequested,
   type CrmMatch,
@@ -119,11 +121,28 @@ describe('lookupCustomer', () => {
   })
 })
 
+describe('confidentiality of what the CRM holds', () => {
+  it('tells the model never to repeat stored data when a customer is verified', () => {
+    for (const kind of ['registered', 'registered_by_claim'] as const) {
+      expect(customerContextBlock(kind)).toMatch(/confidential/)
+      expect(customerContextBlock(kind)).toMatch(/even if the customer asks/)
+    }
+  })
+
+  it('shows the model none of the details already on file, only that they exist', () => {
+    const block = rememberedDetailsBlock()
+    expect(block).toMatch(/never read them out/i)
+    expect(block).toMatch(/Do not ask for them again/)
+    // No values can leak: the block takes no data at all.
+    expect(rememberedDetailsBlock.length).toBe(0)
+  })
+})
+
 describe('customerContextBlock', () => {
   it('gives the first name only when asked and always forbids reading data back', () => {
     const withName = customerContextBlock('registered', 'Ana')
     expect(withName).toContain('"Ana"')
-    expect(withName).toMatch(/Never read out/)
+    expect(withName).toMatch(/never read out/i)
     expect(customerContextBlock('registered_by_claim')).not.toContain('first name')
   })
 })
@@ -173,7 +192,7 @@ describe('resolveCustomerContext', () => {
         return b
       },
     }) as never
-  const args = { conversationId: 'cv', contactId: 'ct' }
+  const args = { conversationId: 'cv', contactId: 'ct', attempts: 0 }
   const fresh = (): CrmMatch => ({
     status: 'not_found',
     source: 'whatsapp',
@@ -205,7 +224,7 @@ describe('resolveCustomerContext', () => {
       }),
     ).toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(saved).toHaveLength(0)
+    expect(saved.filter((v) => (v as Record<string, unknown>).crm_match)).toHaveLength(0)
   })
 
   it('recognises the WhatsApp number, greets by first name and remembers it', async () => {
@@ -218,7 +237,7 @@ describe('resolveCustomerContext', () => {
       messages: [{ role: 'user', content: 'Hola' }],
     })
     expect(block).toContain('"Ana"')
-    expect(saved[0]).toMatchObject({ crm_match: { status: 'found', source: 'whatsapp', id: 'z1' } })
+    expect(saved.find((v) => (v as Record<string, unknown>).crm_match)).toMatchObject({ crm_match: { status: 'found', source: 'whatsapp', id: 'z1' } })
   })
 
   it('stays silent for an unknown number and does not ask again soon', async () => {
@@ -243,7 +262,7 @@ describe('resolveCustomerContext', () => {
     })
     expect(block).not.toContain('Ana')
     expect(block).toMatch(/matches a customer already registered/)
-    expect(saved[0]).toMatchObject({ crm_match: { status: 'found', source: 'claimed' } })
+    expect(saved.find((v) => (v as Record<string, unknown>).crm_match)).toMatchObject({ crm_match: { status: 'found', source: 'claimed' } })
   })
 
   it('tells the model when the claimed data was not found, and when the lookup is down', async () => {
@@ -259,7 +278,30 @@ describe('resolveCustomerContext', () => {
     expect(
       await resolveCustomerContext({ db: db(), ...args, stored: fresh(), messages }),
     ).toMatch(/could not be checked/)
-    expect(saved).toHaveLength(0)
+    expect(saved.filter((v) => (v as Record<string, unknown>).crm_match)).toHaveLength(0)
+  })
+
+  it('counts every email check and stops after the limit, so it cannot probe which emails exist', async () => {
+    reply({ found: false })
+    const messages = [
+      { role: 'assistant', content: ASK },
+      { role: 'user', content: 'otro@x.co' },
+    ]
+    // Within the limit: the check runs and the counter goes up.
+    await resolveCustomerContext({ db: db(), ...args, attempts: 2, stored: fresh(), messages })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(saved).toContainEqual({ crm_lookup_attempts: 3 })
+    // At the limit: no lookup at all.
+    fetchMock.mockClear()
+    const out = await resolveCustomerContext({
+      db: db(),
+      ...args,
+      attempts: MAX_VERIFICATIONS_PER_CONVERSATION,
+      stored: fresh(),
+      messages,
+    })
+    expect(out).toMatch(/no more verifications/)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('does not look a typed phone up: verification is by email only', async () => {

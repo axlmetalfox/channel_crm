@@ -86,7 +86,7 @@ export async function dispatchInboundToAiReply(
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
-      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count, crm_match')
+      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count, crm_match, crm_lookup_attempts')
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
@@ -168,11 +168,12 @@ export async function dispatchInboundToAiReply(
             conversationId,
             contactId,
             stored: (conv.crm_match as CrmMatch | null) ?? null,
+            attempts: (conv.crm_lookup_attempts as number | null) ?? 0,
             messages,
           })
         : null
     const customerContext =
-      [remembered ? rememberedDetailsBlock(remembered) : null, crmContext].filter(Boolean).join('\n\n') ||
+      [remembered ? rememberedDetailsBlock() : null, crmContext].filter(Boolean).join('\n\n') ||
       null
 
     const systemPrompt = buildSystemPrompt({

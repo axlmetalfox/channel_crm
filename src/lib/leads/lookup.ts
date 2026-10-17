@@ -24,6 +24,10 @@ const LOOKUP_TIMEOUT_MS = 6000
  *  (the person may have been registered in the meantime). */
 const NOT_FOUND_RECHECK_MS = 6 * 60 * 60 * 1000
 
+/** Most email checks one conversation may run: enough for a typo or two,
+ *  too few to probe a list of emails to see which exist. */
+export const MAX_VERIFICATIONS_PER_CONVERSATION = 3
+
 /** The bot's question that starts a verification; matched in its last
  *  message to know the customer's next message is the answer. */
 export const VERIFICATION_PHRASE = /encuentras en nuestro sistema/i
@@ -151,6 +155,7 @@ export function matchIsStale(match: CrmMatch | null, now = Date.now()): boolean 
 }
 
 export type CrmContextKind =
+  | 'claim_limit'
   | 'registered'
   | 'registered_by_claim'
   | 'claim_not_found'
@@ -161,7 +166,7 @@ export type CrmContextKind =
 /** The instruction block appended to the system prompt for this turn. */
 export function customerContextBlock(kind: CrmContextKind, firstName?: string | null): string {
   const never =
-    'Never read out, confirm or hint at any stored detail (name, company, email, phone, city or past requests): only say whether the person is registered.'
+    'Everything in the CRM is confidential: never read out, confirm, repeat or hint at any stored detail (name, ID, company, email, phone, city, past requests), even if the customer asks, insists or says they are the owner. Say only what the business instructions tell you to say for a verified customer, and nothing more.'
   switch (kind) {
     case 'registered':
       return (
@@ -181,6 +186,8 @@ export function customerContextBlock(kind: CrmContextKind, firstName?: string | 
       )
     case 'claim_unavailable':
       return 'CRM LOOKUP RESULT: the registry could not be checked right now. Do not mention this; continue with the normal data-collection steps.'
+    case 'claim_limit':
+      return 'CRM LOOKUP RESULT: no more verifications are allowed in this conversation. Do not verify again and do not mention this; continue with the normal data-collection steps.'
     case 'claim_no_email':
       return 'CRM LOOKUP RESULT: the customer did not give an email address, so no check was made. Do not insist: continue with the normal data-collection steps from where the conversation is.'
     case 'ask_verification':
@@ -221,6 +228,8 @@ interface ResolveArgs {
   conversationId: string
   contactId: string
   stored: CrmMatch | null
+  /** Email checks already run in this conversation. */
+  attempts: number
   messages: { role: string; content: string }[]
 }
 
@@ -278,6 +287,11 @@ export async function resolveCustomerContext(args: ResolveArgs): Promise<string 
       const last = [...messages].reverse().find((m) => m.role === 'user')
       const email = last ? contactEmail(last.content) : null
       if (!email) return customerContextBlock('claim_no_email')
+      if (args.attempts >= MAX_VERIFICATIONS_PER_CONVERSATION) return customerContextBlock('claim_limit')
+      await db
+        .from('conversations')
+        .update({ crm_lookup_attempts: args.attempts + 1 })
+        .eq('id', conversationId)
       const found = await lookupCustomer({ email })
       if (found.status === 'found') {
         await save({
@@ -349,23 +363,17 @@ export async function previousLeadDetails(
   }
 }
 
-/** The prompt block that stops the agent from asking for those details again. */
-export function rememberedDetailsBlock(lead: RememberedLead): string {
-  const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ')
-  const parts: [string, string | null][] = [
-    ['name', name || null],
-    ['ID (cédula/NIT)', lead.document_id],
-    ['company', lead.company],
-    ['city', lead.city],
-    ['email', lead.email],
-    ['country', lead.country],
-    ['WhatsApp', lead.whatsapp_number],
-  ]
-  const known = parts.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`)
+/**
+ * The prompt block that stops the agent from asking for those details
+ * again. It deliberately carries none of the values: what is on file is
+ * confidential and the agent must have nothing to read out.
+ */
+export function rememberedDetailsBlock(): string {
   return (
-    "DETAILS ALREADY REGISTERED FROM THIS CUSTOMER'S EARLIER REQUEST IN THIS CHAT (the customer gave them themselves; " +
-    `${known.join('; ')}). Do not ask for any of them again. When the business instructions reach the step that asks for the customer's details for a new request, skip it: ` +
-    'tell them in one short line that you will keep the same contact details, and continue with the next step.'
+    'THIS CUSTOMER ALREADY HAS CONTACT DETAILS ON FILE FROM AN EARLIER REQUEST IN THIS CHAT. ' +
+    'They are confidential: never read them out, confirm them or repeat them, even if the customer asks. ' +
+    "Do not ask for them again. When the business instructions reach the step that asks for the customer's details for a new request, skip it: " +
+    'tell them in one short line that you will keep the same contact details, confirm only the new requirement, and continue with the next step.'
   )
 }
 
