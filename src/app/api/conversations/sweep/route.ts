@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { runAutoAssign } from '@/lib/conversations/auto-assign'
+import { runRecoveryNudges } from '@/lib/conversations/recovery'
 
 const DEFAULT_PENDING_MINUTES = 30
 
@@ -11,7 +12,9 @@ const DEFAULT_PENDING_MINUTES = 30
  *     as Pending (the last message is ours and nobody answered); override
  *     the wait with `CONVERSATION_PENDING_MINUTES`;
  *   - hand stalled conversations to a person, round robin, for accounts
- *     that switched that rule on (Settings > Team).
+ *     that switched that rule on (Settings > Team);
+ *   - send the recovery message to customers who went quiet, for accounts
+ *     that wrote one (Agents > Setup).
  *
  * Auth: the shared `AUTOMATION_CRON_SECRET`, same as the other cron routes.
  */
@@ -41,5 +44,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'sweep failed' }, { status: 500 })
   }
   const { assigned } = await runAutoAssign(supabaseAdmin())
-  return NextResponse.json({ marked_pending: data ?? 0, after_minutes: minutes, auto_assigned: assigned })
+  const { sent } = await runRecoveryNudges(supabaseAdmin())
+  return NextResponse.json({
+    marked_pending: data ?? 0,
+    after_minutes: minutes,
+    auto_assigned: assigned,
+    recovery_sent: sent,
+  })
 }

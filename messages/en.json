@@ -1500,6 +1500,28 @@
       "owner": "Owner",
       "ownerHint": "Full control over account and billing"
     },
+    "recovery": {
+      "title": "Recovery message",
+      "description": "If a customer stops answering, the agent writes to them once to pick the conversation back up.",
+      "enable": "Turn on the recovery message",
+      "enableDesc": "Sent once per customer silence, and only when the agent's last question went unanswered.",
+      "sentence": "If after [time] the customer has not answered, send the following message:",
+      "after": "After",
+      "unit": "Unit",
+      "minutes": "minutes",
+      "hours": "hours",
+      "message": "Message",
+      "messagePlaceholder": "I am here and happy to help you complete your request.",
+      "rules": "Between 10 minutes and 23 hours (WhatsApp only allows free-text messages within 24 hours of the customer's last message). It is not sent from 9:00 pm to 7:00 am, during the team's working hours, or in conversations assigned to a person.",
+      "save": "Save",
+      "saved": "Message saved",
+      "saveFailed": "Could not save the message",
+      "needsAgent": "Set up the AI agent above first.",
+      "errorWait": "The wait must be between 10 minutes and 23 hours.",
+      "errorMessageRequired": "Write the message before turning this on.",
+      "errorMessageLong": "The message can have up to 500 characters.",
+      "errorNotConfigured": "Set up the AI agent first."
+    },
     "assignment": {
       "title": "Assign a conversation to a person after inactivity",
       "roundRobin": "Assignments will follow a Round Robin protocol across the team of agents.",

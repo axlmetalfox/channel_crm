@@ -1500,6 +1500,28 @@
       "owner": "Propietario",
       "ownerHint": "Control total de la cuenta y la facturación"
     },
+    "recovery": {
+      "title": "Mensaje de recuperación",
+      "description": "Si el cliente deja de responder, el agente le escribe una vez para retomar la conversación.",
+      "enable": "Activar el mensaje de recuperación",
+      "enableDesc": "Se envía una sola vez por silencio del cliente, y solo si lo último que preguntó el agente quedó sin respuesta.",
+      "sentence": "Si después de [tiempo] el cliente no ha respondido, enviar el siguiente mensaje:",
+      "after": "Después de",
+      "unit": "Unidad",
+      "minutes": "minutos",
+      "hours": "horas",
+      "message": "Mensaje",
+      "messagePlaceholder": "Estoy muy atento para ayudarte a completar tu requerimiento.",
+      "rules": "Entre 10 minutos y 23 horas (WhatsApp solo permite escribir libremente durante las 24 horas siguientes al último mensaje del cliente). No se envía de 9:00 pm a 7:00 am, ni en horario de atención del equipo, ni en conversaciones asignadas a una persona.",
+      "save": "Guardar",
+      "saved": "Mensaje guardado",
+      "saveFailed": "No se pudo guardar el mensaje",
+      "needsAgent": "Primero configura el agente de IA arriba.",
+      "errorWait": "El tiempo debe estar entre 10 minutos y 23 horas.",
+      "errorMessageRequired": "Escribe el mensaje antes de activarlo.",
+      "errorMessageLong": "El mensaje puede tener hasta 500 caracteres.",
+      "errorNotConfigured": "Primero configura el agente de IA."
+    },
     "assignment": {
       "title": "Asignar conversación a un humano después de inactividad",
       "roundRobin": "Las asignaciones se realizarán con protocolo Round Robin entre el equipo de agentes.",
