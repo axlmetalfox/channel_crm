@@ -10,6 +10,7 @@ import {
   type CrmMatch,
 } from './lookup'
 import { consentFromNotice } from './consent'
+import { missingManualFields, unverifiedFields } from './evidence'
 import { judgeLead, LEAD_REQUEST_TYPES, parseLead, type Lead } from './schema'
 import {
   loadInterviewMessages,
@@ -36,6 +37,11 @@ import {
 // The data-processing consent flag comes from the stored draft, never
 // from the browser: a lead whose chat shows no authorization cannot be
 // sent by editing a form.
+//
+// The customer's data must be real: a person may correct what the form
+// proposed, but only with a value the customer wrote in the chat (see
+// evidence.ts), and name, surname, WhatsApp, email and city are required.
+// Free notes travel to the CRM as written.
 // ============================================================
 
 export type ManualLeadErrorCode =
@@ -47,12 +53,18 @@ export type ManualLeadErrorCode =
   | 'invalid_lead'
   | 'consent_required'
   | 'incomplete'
+  | 'unverified_data'
+
+/** Longest note an agent can attach to a lead. */
+export const MAX_NOTES_CHARS = 2000
 
 export class ManualLeadError extends Error {
   constructor(
     readonly code: ManualLeadErrorCode,
     message: string,
     readonly status: number,
+    /** The form fields the error is about, when it is about some. */
+    readonly fields?: string[],
   ) {
     super(message)
     this.name = 'ManualLeadError'
@@ -269,16 +281,21 @@ export async function submitManualLead(
   if (!lead) {
     throw new ManualLeadError('invalid_lead', 'Describe the request and choose its type', 400)
   }
-  const verdict = judgeLead(lead)
-  if (verdict === 'no_consent') {
+  if (judgeLead(lead) === 'no_consent') {
     throw new ManualLeadError(
       'consent_required',
       'The customer has not authorized the processing of their data in this chat',
       400,
     )
   }
-  if (verdict === 'incomplete') {
-    throw new ManualLeadError('incomplete', 'A first name and a way to reach the customer are required', 400)
+  const missing = missingManualFields(lead)
+  if (missing.length > 0) {
+    throw new ManualLeadError(
+      'incomplete',
+      'Name, surname, WhatsApp number, email and city are required',
+      400,
+      missing,
+    )
   }
 
   const conv = row.conversation_id
@@ -287,6 +304,25 @@ export async function submitManualLead(
   const transcript = row.conversation_id
     ? await loadInterviewMessages(db, row.conversation_id, new Date().toISOString())
     : []
+
+  // Only data the customer gave (or the server proposed) may be sent.
+  const unverified = unverifiedFields(
+    editableFields(lead),
+    row.draft?.lead ?? null,
+    transcript.filter((m) => m.role === 'user').map((m) => m.content),
+  )
+  if (unverified.length > 0) {
+    throw new ManualLeadError(
+      'unverified_data',
+      'The customer did not write these details in the chat',
+      400,
+      unverified,
+    )
+  }
+  const notes =
+    typeof e.notes === 'string'
+      ? e.notes.replace(/\r\n/g, '\n').trim().slice(0, MAX_NOTES_CHARS) || null
+      : null
   const crm = conv?.crm_match ?? null
   const leadFields = editableFields(lead)
 
@@ -309,6 +345,7 @@ export async function submitManualLead(
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution: conv?.attribution ?? null,
     registered_by: { user_id: userId, name: userName },
+    notes,
     transcript: trimTranscript(transcript),
   }
 

@@ -140,7 +140,7 @@ describe('submitManualLead', () => {
     contact_id: 'ct-1',
     status,
     created_by_user_id: by,
-    draft: { lead: { ...EXTRACTED, consent_given: consent } },
+    draft: { lead: { ...EXTRACTED, whatsapp_number: '+573112580000', consent_given: consent } },
     created_at: '2026-10-16T12:00:00.000Z',
   })
   const edits = {
@@ -156,6 +156,11 @@ describe('submitManualLead', () => {
     request_type: 'maquina_nueva',
     consent_given: true,
   }
+  // What the customer wrote in the chat: every detail the form holds.
+  const customerSaid = [
+    { role: 'assistant', content: 'Hola, ¿cuál es su correo y su ciudad?' },
+    { role: 'user', content: 'Soy Ana Gómez Ruiz de Lácteos, mi correo es ANA@x.co, en Cali' },
+  ]
   const args = (over: Record<string, unknown> = {}) => ({
     accountId: 'acct-1',
     intakeId: 'draft-1',
@@ -167,6 +172,7 @@ describe('submitManualLead', () => {
 
   it('delivers the reviewed lead marked as registered by the agent', async () => {
     h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue(customerSaid)
     const out = await submitManualLead(fakeDb(), args())
     expect(out.status).toBe('delivered')
     const payload = h.state.updated?.payload as Record<string, unknown>
@@ -177,6 +183,46 @@ describe('submitManualLead', () => {
     })
     expect(h.state.updated).toMatchObject({ status: 'pending', attempts: 0 })
     expect(h.processIntake).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends the notes along, trimmed and capped', async () => {
+    h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, notes: '  Prefiere llamada\nen la tarde  ' } }))
+    expect((h.state.updated?.payload as Record<string, unknown>).notes).toBe('Prefiere llamada\nen la tarde')
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, notes: 'x'.repeat(5000) } }))
+    expect(((h.state.updated?.payload as Record<string, unknown>).notes as string).length).toBe(2000)
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, notes: '   ' } }))
+    expect((h.state.updated?.payload as Record<string, unknown>).notes).toBeNull()
+  })
+
+  it('refuses data the customer never wrote and says which fields', async () => {
+    h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await expect(
+      submitManualLead(fakeDb(), args({ edits: { ...edits, email: 'inventado@x.co', city: 'Bogotá' } })),
+    ).rejects.toMatchObject({ code: 'unverified_data', fields: ['email', 'city'] })
+    expect(h.processIntake).not.toHaveBeenCalled()
+  })
+
+  it('does not accept a value only the agent or the AI wrote', async () => {
+    h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue([
+      { role: 'assistant', content: 'Anotado: inventado@x.co en Bogotá' },
+      { role: 'user', content: 'Soy Ana Gómez Ruiz de Lácteos, mi correo es ANA@x.co, en Cali' },
+    ])
+    await expect(
+      submitManualLead(fakeDb(), args({ edits: { ...edits, email: 'inventado@x.co' } })),
+    ).rejects.toMatchObject({ code: 'unverified_data', fields: ['email'] })
+  })
+
+  it('requires name, surname, WhatsApp, email and city', async () => {
+    h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await expect(
+      submitManualLead(fakeDb(), args({ edits: { ...edits, last_name: '', email: '', city: '' } })),
+    ).rejects.toMatchObject({ code: 'incomplete', fields: ['last_name', 'email', 'city'] })
+    expect(h.processIntake).not.toHaveBeenCalled()
   })
 
   it('takes consent from the stored draft, not from the browser', async () => {

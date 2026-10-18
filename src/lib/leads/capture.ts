@@ -77,6 +77,8 @@ export interface LeadPayload {
   attribution: Attribution | null
   /** Set when a person sent the lead from the inbox instead of the AI. */
   registered_by: { user_id: string; name: string | null } | null
+  /** Free notes the agent added (manual leads only). */
+  notes?: string | null
   transcript: { role: 'customer' | 'assistant'; text: string }[]
 }
 

@@ -40,7 +40,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ status: result.status })
   } catch (err) {
     if (err instanceof ManualLeadError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status })
+      return NextResponse.json(
+        { error: err.message, code: err.code, ...(err.fields ? { fields: err.fields } : {}) },
+        { status: err.status },
+      )
     }
     return toErrorResponse(err)
   }
