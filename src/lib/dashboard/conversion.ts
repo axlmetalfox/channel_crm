@@ -14,11 +14,13 @@ import { localDayKey } from './date-utils'
 //
 //   AI effectiveness   of the conversations the AI interviewed (it wrote at
 //                      least once in the range), how many it registered
-//   per person         leads each agent registered and the average time
-//                      from the agent's first message in the chat to the
-//                      lead reaching the CRM (when the chat has no message
-//                      from a person yet, from the moment the agent opened
-//                      the form)
+//   per person         conversations each agent received in the range
+//                      (conversation_assignments), how many of those they
+//                      registered, the rate between the two, and the average
+//                      time from receiving a chat to the lead reaching the
+//                      CRM. Without an assignment on record, the time counts
+//                      from the agent's first message in the chat, or from
+//                      the moment the agent opened the form.
 // ============================================================
 
 /** Lead statuses that count as "registered". */
@@ -37,7 +39,14 @@ export interface ConversionDay {
 export interface AgentConversion {
   userId: string
   name: string
+  /** Leads this person registered in the range. */
   registered: number
+  /** Conversations assigned to this person in the range. */
+  received: number
+  /** Of those, how many this person registered (whenever they did). */
+  receivedRegistered: number
+  /** receivedRegistered / received, 0 when nothing was received. */
+  rate: number
   /** Average minutes to register, null when no lead has a usable timing. */
   avgMinutes: number | null
 }
@@ -73,6 +82,10 @@ export interface ConversionExtras {
   firstHumanMessageAt: Record<string, string>
   /** user id -> display name. */
   names: Record<string, string>
+  /** Assignment log rows, for the range and for the chats of manual leads. */
+  assignments?: { conversation_id: string; agent_id: string; assigned_at: string }[]
+  /** Manual leads of the chats assigned in the range, registered whenever. */
+  cohortLeads?: { conversation_id: string | null; created_by_user_id: string | null }[]
 }
 
 /** Every local day key from `from` to `to`, both inclusive (YYYY-MM-DD). */
@@ -131,6 +144,34 @@ export function summarizeConversion(
   // The AI's interviews: every chat it wrote in, plus any it registered.
   const interviewed = new Set<string>([...extras.aiConversationIds, ...ai])
 
+  // Chats each person received in the range (distinct), from the log.
+  const assignments = extras.assignments ?? []
+  const received = new Map<string, Set<string>>()
+  for (const a of assignments) {
+    const day = localDayKey(a.assigned_at)
+    if (day < from || day > to) continue
+    if (!received.has(a.agent_id)) received.set(a.agent_id, new Set())
+    received.get(a.agent_id)!.add(a.conversation_id)
+  }
+  const registeredOfReceived = new Map<string, Set<string>>()
+  for (const l of extras.cohortLeads ?? []) {
+    if (!l.created_by_user_id || !l.conversation_id) continue
+    if (!received.get(l.created_by_user_id)?.has(l.conversation_id)) continue
+    if (!registeredOfReceived.has(l.created_by_user_id)) registeredOfReceived.set(l.created_by_user_id, new Set())
+    registeredOfReceived.get(l.created_by_user_id)!.add(l.conversation_id)
+  }
+
+  // When the person got the chat: their latest assignment before the lead.
+  const assignedBefore = (agent: string, conv: string, before: number): number => {
+    let best = NaN
+    for (const a of assignments) {
+      if (a.agent_id !== agent || a.conversation_id !== conv) continue
+      const at = new Date(a.assigned_at).getTime()
+      if (at <= before && !(at < best)) best = at
+    }
+    return best
+  }
+
   // One entry per (person, chat): the first time that person's lead was sent.
   const perAgent = new Map<string, { chats: Set<string>; minutes: number[] }>()
   leads.forEach((lead, i) => {
@@ -141,22 +182,38 @@ export function summarizeConversion(
     if (entry.chats.has(key)) return
     entry.chats.add(key)
     const sent = new Date(lead.delivered_at ?? lead.created_at).getTime()
+    const opened = new Date(lead.created_at).getTime()
+    const assignedAt = lead.conversation_id
+      ? assignedBefore(lead.created_by_user_id, lead.conversation_id, opened)
+      : NaN
     const spoke = lead.conversation_id ? extras.firstHumanMessageAt[lead.conversation_id] : undefined
     const spokeAt = spoke ? new Date(spoke).getTime() : NaN
-    const opened = new Date(lead.created_at).getTime()
     // A person's message after the lead was opened says nothing about effort.
-    const start = Number.isFinite(spokeAt) && spokeAt <= opened ? spokeAt : opened
+    const start = Number.isFinite(assignedAt)
+      ? assignedAt
+      : Number.isFinite(spokeAt) && spokeAt <= opened
+        ? spokeAt
+        : opened
     const minutes = (sent - start) / 60000
     if (Number.isFinite(minutes) && minutes >= 0) entry.minutes.push(minutes)
   })
-  const agents: AgentConversion[] = [...perAgent.entries()]
-    .map(([userId, e]) => ({
-      userId,
-      name: extras.names[userId] ?? '',
-      registered: e.chats.size,
-      avgMinutes: e.minutes.length ? e.minutes.reduce((a, b) => a + b, 0) / e.minutes.length : null,
-    }))
-    .sort((a, b) => b.registered - a.registered)
+  const agentIds = new Set<string>([...perAgent.keys(), ...received.keys()])
+  const agents: AgentConversion[] = [...agentIds]
+    .map((userId) => {
+      const e = perAgent.get(userId)
+      const got = received.get(userId)?.size ?? 0
+      const done = registeredOfReceived.get(userId)?.size ?? 0
+      return {
+        userId,
+        name: extras.names[userId] ?? '',
+        registered: e?.chats.size ?? 0,
+        received: got,
+        receivedRegistered: done,
+        rate: got > 0 ? done / got : 0,
+        avgMinutes: e && e.minutes.length ? e.minutes.reduce((a, b) => a + b, 0) / e.minutes.length : null,
+      }
+    })
+    .sort((a, b) => b.received - a.received || b.registered - a.registered)
 
   const incoming = conversations.length
   return {
@@ -225,16 +282,20 @@ export async function loadConversionSummary(
     ),
   ])
 
-  const [aiConversationIds, firstHumanMessageAt, names] = await Promise.all([
+  const assignments = await loadAssignments(db, start, end, leads)
+  const [aiConversationIds, firstHumanMessageAt, names, cohortLeads] = await Promise.all([
     loadAiConversationIds(db, start, end),
     loadFirstHumanMessages(db, leads),
-    loadNames(db, leads),
+    loadNames(db, leads, assignments),
+    loadCohortLeads(db, assignments, start, end),
   ])
 
   return summarizeConversion(from, to, conversations, leads, {
     aiConversationIds,
     firstHumanMessageAt,
     names,
+    assignments,
+    cohortLeads,
   })
 }
 
@@ -282,10 +343,103 @@ async function loadFirstHumanMessages(
   return first
 }
 
-/** Display names of the people who registered manual leads. */
-async function loadNames(db: SupabaseClient, leads: LeadRow[]): Promise<Record<string, string>> {
+interface AssignmentRow {
+  conversation_id: string
+  agent_id: string
+  assigned_at: string
+}
+
+/**
+ * Assignment log rows made in the range, plus the earlier ones of the chats
+ * that have a manual lead (to know when the person received them).
+ */
+async function loadAssignments(
+  db: SupabaseClient,
+  start: Date,
+  end: Date,
+  leads: LeadRow[],
+): Promise<AssignmentRow[]> {
+  const inRange = await fetchAll<AssignmentRow>((a, b) =>
+    db
+      .from('conversation_assignments')
+      .select('conversation_id, agent_id, assigned_at')
+      .gte('assigned_at', start.toISOString())
+      .lt('assigned_at', end.toISOString())
+      .order('assigned_at', { ascending: true })
+      .range(a, b),
+  )
+  const have = new Set(inRange.map((r) => r.conversation_id))
   const ids = [
-    ...new Set(leads.map((l) => l.created_by_user_id).filter((id): id is string => !!id)),
+    ...new Set(
+      leads
+        .filter((l) => l.source === 'manual' && l.conversation_id && !have.has(l.conversation_id))
+        .map((l) => l.conversation_id as string),
+    ),
+  ]
+  const rows = [...inRange]
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    rows.push(
+      ...(await fetchAll<AssignmentRow>((a, b) =>
+        db
+          .from('conversation_assignments')
+          .select('conversation_id, agent_id, assigned_at')
+          .in('conversation_id', chunk)
+          .order('assigned_at', { ascending: true })
+          .range(a, b),
+      )),
+    )
+  }
+  return rows
+}
+
+/** Manual leads of the chats assigned in the range, whenever they were registered. */
+async function loadCohortLeads(
+  db: SupabaseClient,
+  assignments: AssignmentRow[],
+  start: Date,
+  end: Date,
+): Promise<{ conversation_id: string | null; created_by_user_id: string | null }[]> {
+  const ids = [
+    ...new Set(
+      assignments
+        .filter((a) => {
+          const at = new Date(a.assigned_at).getTime()
+          return at >= start.getTime() && at < end.getTime()
+        })
+        .map((a) => a.conversation_id),
+    ),
+  ]
+  const out: { conversation_id: string | null; created_by_user_id: string | null }[] = []
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    out.push(
+      ...(await fetchAll<{ conversation_id: string | null; created_by_user_id: string | null }>((a, b) =>
+        db
+          .from('lead_intakes')
+          .select('conversation_id, created_by_user_id')
+          .eq('source', 'manual')
+          .in('status', REGISTERED_STATUSES)
+          .in('conversation_id', chunk)
+          .order('created_at', { ascending: true })
+          .range(a, b),
+      )),
+    )
+  }
+  return out
+}
+
+/** Display names of the people who registered leads or received chats. */
+async function loadNames(
+  db: SupabaseClient,
+  leads: LeadRow[],
+  assignments: AssignmentRow[],
+): Promise<Record<string, string>> {
+  const ids = [
+    ...new Set([
+      ...leads.map((l) => l.created_by_user_id).filter((id): id is string => !!id),
+      ...assignments.map((a) => a.agent_id),
+    ]),
   ]
   if (ids.length === 0) return {}
   const { data } = await db.from('profiles').select('user_id, full_name').in('user_id', ids)

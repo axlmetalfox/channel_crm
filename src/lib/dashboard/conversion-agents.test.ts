@@ -63,8 +63,8 @@ describe('per-agent registration time', () => {
       },
     )
     expect(s.agents).toEqual([
-      { userId: 'u1', name: 'Elcy', registered: 2, avgMinutes: 45 },
-      { userId: 'u2', name: 'Carolina', registered: 1, avgMinutes: 5 },
+      { userId: 'u1', name: 'Elcy', registered: 2, received: 0, receivedRegistered: 0, rate: 0, avgMinutes: 45 },
+      { userId: 'u2', name: 'Carolina', registered: 1, received: 0, receivedRegistered: 0, rate: 0, avgMinutes: 5 },
     ])
   })
 

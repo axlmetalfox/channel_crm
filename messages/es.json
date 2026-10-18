@@ -106,13 +106,15 @@
       "rateHint": "Registradas / entrantes",
       "aiEffectiveness": "Efectividad del agente IA",
       "aiEffectivenessHint": "{registered} registradas de {interviewed} entrevistas",
-      "agentsTitle": "Registro por asesor",
+      "agentsTitle": "Efectividad por asesor",
       "agentsEmpty": "Ningún asesor registró leads en este rango.",
       "agentName": "Asesor",
-      "agentRegistered": "Registradas",
+      "agentRegistered": "Leads registrados",
       "agentAvg": "Tiempo promedio",
       "agentUnknown": "Sin nombre",
-      "agentsHint": "Tiempo promedio desde el primer mensaje del asesor en el chat hasta que el lead llega al CRM (si no había mensaje suyo, desde que abrió el formulario).",
+      "agentsHint": "Recibidas: conversaciones que se le asignaron en el rango. Efectividad: de esas, cuántas registró como lead. Tiempo promedio: desde que recibió el chat hasta que el lead llega al CRM.",
+      "agentReceived": "Recibidas",
+      "agentRate": "Efectividad",
       "error": "No se pudo cargar la conversión."
     },
     "quickActions": {

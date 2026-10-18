@@ -106,13 +106,15 @@
       "rateHint": "Registered / incoming",
       "aiEffectiveness": "AI agent effectiveness",
       "aiEffectivenessHint": "{registered} registered out of {interviewed} interviews",
-      "agentsTitle": "Registrations by agent",
+      "agentsTitle": "Effectiveness by agent",
       "agentsEmpty": "No agent registered leads in this range.",
       "agentName": "Agent",
-      "agentRegistered": "Registered",
+      "agentRegistered": "Leads registered",
       "agentAvg": "Average time",
       "agentUnknown": "No name",
-      "agentsHint": "Average time from the agent's first message in the chat until the lead reaches the CRM (if they had not written yet, from when they opened the form).",
+      "agentsHint": "Received: conversations assigned to them in the range. Effectiveness: of those, how many they registered as a lead. Average time: from receiving the chat until the lead reaches the CRM.",
+      "agentReceived": "Received",
+      "agentRate": "Effectiveness",
       "error": "Could not load the conversion."
     },
     "quickActions": {

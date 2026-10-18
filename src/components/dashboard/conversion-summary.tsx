@@ -208,7 +208,9 @@ export function ConversionSummaryPanel() {
                     <thead>
                       <tr className="border-b border-border text-left text-xs text-muted-foreground">
                         <th className="py-2 pr-4 font-medium">{t('agentName')}</th>
+                        <th className="py-2 pr-4 text-right font-medium">{t('agentReceived')}</th>
                         <th className="py-2 pr-4 text-right font-medium">{t('agentRegistered')}</th>
+                        <th className="py-2 pr-4 text-right font-medium">{t('agentRate')}</th>
                         <th className="py-2 text-right font-medium">{t('agentAvg')}</th>
                       </tr>
                     </thead>
@@ -216,7 +218,11 @@ export function ConversionSummaryPanel() {
                       {data.agents.map((a) => (
                         <tr key={a.userId} className="border-b border-border/50 last:border-0">
                           <td className="py-2 pr-4 text-foreground">{a.name || t('agentUnknown')}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums text-foreground">{a.received}</td>
                           <td className="py-2 pr-4 text-right tabular-nums text-foreground">{a.registered}</td>
+                          <td className="py-2 pr-4 text-right tabular-nums text-foreground">
+                            {a.received > 0 ? percent(a.rate) : '—'}
+                          </td>
                           <td className="py-2 text-right tabular-nums text-foreground">
                             {a.avgMinutes === null ? '—' : formatDuration(a.avgMinutes)}
                           </td>
