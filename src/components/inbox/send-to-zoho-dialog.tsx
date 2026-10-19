@@ -68,6 +68,8 @@ interface Proposal {
   consent_given: boolean;
   already_delivered_at: string | null;
   known_in_crm: boolean;
+  /** The admin's switch: true = the form is locked to chat data. */
+  validate_data: boolean;
 }
 
 const EMPTY: LeadForm = {
@@ -190,6 +192,8 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
   const set = (key: keyof LeadForm) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  // With the admin's check off the fields are free to type in.
+  const validate = proposal?.validate_data !== false;
   const missing = REQUIRED.filter((key) => !form[key].trim());
   const canSend =
     !!proposal &&
@@ -248,13 +252,13 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
             set(key)(e.target.value);
             setFlagged((f) => f.filter((k) => k !== key));
           }}
-          readOnly={!correcting}
+          readOnly={validate && !correcting}
           disabled={sending}
           aria-invalid={isFlagged || (required && !form[key].trim())}
           className={
             isFlagged
               ? "border-red-500"
-              : !correcting
+              : validate && !correcting
                 ? "bg-muted/50 text-foreground"
                 : undefined
           }
@@ -309,10 +313,12 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
               </div>
             )}
 
-            <div className="flex gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-              <Lock className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <span>{t("dataFromCustomer")}</span>
-            </div>
+            {validate && (
+              <div className="flex gap-2 rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Lock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <span>{t("dataFromCustomer")}</span>
+              </div>
+            )}
 
             {missing.length > 0 && (
               <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-500">
@@ -341,16 +347,18 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
                 <RefreshCw className="mr-2 h-3.5 w-3.5" />
                 {t("reread")}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setCorrecting((c) => !c)}
-                disabled={sending}
-              >
-                <Pencil className="mr-2 h-3.5 w-3.5" />
-                {correcting ? t("lockData") : t("correctData")}
-              </Button>
+              {validate && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCorrecting((c) => !c)}
+                  disabled={sending}
+                >
+                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  {correcting ? t("lockData") : t("correctData")}
+                </Button>
+              )}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

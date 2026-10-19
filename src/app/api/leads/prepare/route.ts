@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       consent_given: draft.consentGiven,
       already_delivered_at: draft.alreadyDeliveredAt,
       known_in_crm: draft.knownInCrm,
+      validate_data: draft.validateData,
     })
   } catch (err) {
     if (err instanceof ManualLeadError) {

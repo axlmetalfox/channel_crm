@@ -41,7 +41,8 @@ import {
 // The customer's data must be real: a person may correct what the form
 // proposed, but only with a value the customer wrote in the chat (see
 // evidence.ts), and name, surname, WhatsApp, email and city are required.
-// Free notes travel to the CRM as written.
+// Free notes travel to the CRM as written. An admin can switch the data
+// check off (accounts.validate_manual_leads); the required fields stay.
 // ============================================================
 
 export type ManualLeadErrorCode =
@@ -83,6 +84,8 @@ export interface ManualLeadDraft {
   alreadyDeliveredAt: string | null
   /** Whether the CRM already knew this customer (their data filled gaps). */
   knownInCrm: boolean
+  /** Whether the form is locked to data from the chat (the admin's switch). */
+  validateData: boolean
 }
 
 interface ConversationRow {
@@ -105,6 +108,16 @@ async function loadConversation(
     .maybeSingle()
   if (!data) throw new ManualLeadError('not_found', 'Conversation not found', 404)
   return data as ConversationRow
+}
+
+/** The admin's "validate chat data" switch; on unless explicitly turned off. */
+async function validatesData(db: SupabaseClient, accountId: string): Promise<boolean> {
+  const { data } = await db
+    .from('accounts')
+    .select('validate_manual_leads')
+    .eq('id', accountId)
+    .maybeSingle()
+  return data?.validate_manual_leads !== false
 }
 
 async function channelPhone(db: SupabaseClient, contactId: string | null): Promise<string | null> {
@@ -217,6 +230,7 @@ export async function prepareManualLead(
     consentGiven: lead.consent_given,
     alreadyDeliveredAt: (delivered?.delivered_at as string | null | undefined) ?? null,
     knownInCrm,
+    validateData: await validatesData(db, accountId),
   }
 }
 
@@ -305,12 +319,15 @@ export async function submitManualLead(
     ? await loadInterviewMessages(db, row.conversation_id, new Date().toISOString())
     : []
 
-  // Only data the customer gave (or the server proposed) may be sent.
-  const unverified = unverifiedFields(
-    editableFields(lead),
-    row.draft?.lead ?? null,
-    transcript.filter((m) => m.role === 'user').map((m) => m.content),
-  )
+  // Only data the customer gave (or the server proposed) may be sent, unless
+  // an admin turned the check off.
+  const unverified = (await validatesData(db, accountId))
+    ? unverifiedFields(
+        editableFields(lead),
+        row.draft?.lead ?? null,
+        transcript.filter((m) => m.role === 'user').map((m) => m.content),
+      )
+    : []
   if (unverified.length > 0) {
     throw new ManualLeadError(
       'unverified_data',

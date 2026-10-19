@@ -1546,6 +1546,16 @@
       "owner": "Propietario",
       "ownerHint": "Control total de la cuenta y la facturación"
     },
+    "leadValidation": {
+      "title": "Validar datos del chat",
+      "description": "Controla cómo los asesores envían un lead a Zoho a mano (/enviarZoho).",
+      "toggle": "Validar datos chat",
+      "onHint": "Activado: los datos del formulario son de solo lectura. Un asesor solo puede corregir un dato con un valor que el cliente escribió en el chat.",
+      "offHint": "Desactivado: los campos del formulario quedan libres y el asesor puede escribir lo que requiera. Siguen siendo obligatorios nombre, apellido, WhatsApp, correo y ciudad.",
+      "savedOn": "Validación activada",
+      "savedOff": "Validación desactivada",
+      "saveFailed": "No se pudo guardar el cambio"
+    },
     "recovery": {
       "title": "Mensaje de recuperación",
       "description": "Si el cliente deja de responder, el agente le escribe una vez para retomar la conversación.",

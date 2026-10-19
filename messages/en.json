@@ -1546,6 +1546,16 @@
       "owner": "Owner",
       "ownerHint": "Full control over account and billing"
     },
+    "leadValidation": {
+      "title": "Validate chat data",
+      "description": "Controls how agents send a lead to Zoho by hand (/enviarZoho).",
+      "toggle": "Validate chat data",
+      "onHint": "On: the form data is read-only. An agent can only correct a detail with a value the customer wrote in the chat.",
+      "offHint": "Off: the form fields are free and the agent can type what they need. Name, surname, WhatsApp, email and city are still required.",
+      "savedOn": "Validation turned on",
+      "savedOff": "Validation turned off",
+      "saveFailed": "Could not save the change"
+    },
     "recovery": {
       "title": "Recovery message",
       "description": "If a customer stops answering, the agent writes to them once to pick the conversation back up.",

@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
     draftRow: null as Record<string, unknown> | null,
     inserted: null as Record<string, unknown> | null,
     updated: null as Record<string, unknown> | null,
+    validate: true as boolean,
   },
 }))
 
@@ -69,6 +70,7 @@ function fakeDb() {
       b.maybeSingle = () => {
         if (table === 'conversations') return Promise.resolve({ data: h.state.conversation })
         if (table === 'contacts') return Promise.resolve({ data: { phone: h.state.contactPhone } })
+        if (table === 'accounts') return Promise.resolve({ data: { validate_manual_leads: h.state.validate } })
         if (table === 'lead_intakes') {
           return Promise.resolve({ data: h.state.draftRow ?? h.state.delivered })
         }
@@ -88,6 +90,7 @@ beforeEach(() => {
   h.state.draftRow = null
   h.state.inserted = null
   h.state.updated = null
+  h.state.validate = true
   h.loadMessages.mockResolvedValue([
     { role: 'assistant', content: 'Hola' },
     { role: 'user', content: 'Quiero sachets' },
@@ -214,6 +217,27 @@ describe('submitManualLead', () => {
     await expect(
       submitManualLead(fakeDb(), args({ edits: { ...edits, email: 'inventado@x.co' } })),
     ).rejects.toMatchObject({ code: 'unverified_data', fields: ['email'] })
+  })
+
+  it('accepts any value when the admin turned the data check off, but still needs the required fields', async () => {
+    h.state.draftRow = draft()
+    h.state.validate = false
+    h.loadMessages.mockResolvedValue(customerSaid)
+    const out = await submitManualLead(
+      fakeDb(),
+      args({ edits: { ...edits, email: 'otro@x.co', city: 'Bogotá' } }),
+    )
+    expect(out.status).toBe('delivered')
+    expect(h.state.updated?.payload).toMatchObject({ lead: { email: 'otro@x.co', city: 'Bogotá' } })
+    await expect(
+      submitManualLead(fakeDb(), args({ edits: { ...edits, email: '' } })),
+    ).rejects.toMatchObject({ code: 'incomplete', fields: ['email'] })
+  })
+
+  it('tells the form whether the data check is on', async () => {
+    expect((await prepareManualLead(fakeDb(), CONFIG, ARGS)).validateData).toBe(true)
+    h.state.validate = false
+    expect((await prepareManualLead(fakeDb(), CONFIG, ARGS)).validateData).toBe(false)
   })
 
   it('requires name, surname, WhatsApp, email and city', async () => {
