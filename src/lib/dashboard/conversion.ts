@@ -265,6 +265,8 @@ export async function loadConversionSummary(
       db
         .from('conversations')
         .select('created_at')
+        // Chats imported from another system did not arrive through TUYO.
+        .is('imported_from', null)
         .gte('created_at', start.toISOString())
         .lt('created_at', end.toISOString())
         .order('created_at', { ascending: true })
