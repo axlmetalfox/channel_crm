@@ -1572,6 +1572,16 @@
       "savedOff": "Ahora no estás disponible",
       "saveFailed": "No se pudo guardar el cambio"
     },
+    "agentVisibility": {
+      "title": "Visibilidad de conversaciones",
+      "description": "Controla qué conversaciones pueden abrir los agentes.",
+      "toggle": "Los agentes solo ven sus conversaciones",
+      "onHint": "Activado: cada agente solo ve las conversaciones que se le asignaron. El administrador, el propietario y los observadores ven todas.",
+      "offHint": "Desactivado: todos los agentes pueden abrir todas las conversaciones, estén o no asignadas.",
+      "savedOn": "Los agentes ahora solo ven sus conversaciones",
+      "savedOff": "Los agentes ahora ven todas las conversaciones",
+      "saveFailed": "No se pudo guardar el cambio"
+    },
     "recovery": {
       "title": "Mensaje de recuperación",
       "description": "Si el cliente deja de responder, el agente le escribe una vez para retomar la conversación.",

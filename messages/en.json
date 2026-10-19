@@ -1572,6 +1572,16 @@
       "savedOff": "You are now unavailable",
       "saveFailed": "Could not save the change"
     },
+    "agentVisibility": {
+      "title": "Conversation visibility",
+      "description": "Controls which conversations agents can open.",
+      "toggle": "Agents only see their own conversations",
+      "onHint": "On: each agent only sees the conversations assigned to them. Admins, the owner and viewers see all of them.",
+      "offHint": "Off: every agent can open every conversation, assigned or not.",
+      "savedOn": "Agents now only see their own conversations",
+      "savedOff": "Agents now see all conversations",
+      "saveFailed": "Could not save the change"
+    },
     "recovery": {
       "title": "Recovery message",
       "description": "If a customer stops answering, the agent writes to them once to pick the conversation back up.",
