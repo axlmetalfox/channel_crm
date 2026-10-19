@@ -1069,19 +1069,25 @@ export function MessageThread({
           {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
+              title={t("transferTitle")}
               className={cn(
                 "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
                 assignedAgentId ? "text-primary" : "text-muted-foreground"
               )}
             >
               <UserPlus className="h-3 w-3" />
-              <span className="hidden sm:inline">{assignLabel}</span>
+              <span className="hidden sm:inline">
+                {assignedAgentId ? `${t("transferLabel")}: ${assignLabel}` : assignLabel}
+              </span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
               className="border-border bg-popover"
             >
+              <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                {t("transferTo")}
+              </div>
               {teammates.length === 0 ? (
                 <DropdownMenuItem disabled className="text-sm text-muted-foreground">
                   {t("noTeammates")}
@@ -1130,7 +1136,7 @@ export function MessageThread({
                     onClick={() => handleAssignChange(null)}
                     className="text-sm text-muted-foreground"
                   >
-                    {t("unassign")}
+                    {t("release")}
                   </DropdownMenuItem>
                 </>
               )}
