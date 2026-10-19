@@ -566,6 +566,13 @@ function InboxPageInner() {
     [activeConversation]
   );
 
+  // The signed-in person handed the conversation to someone else and no
+  // longer sees it: take it out of the list and close the thread.
+  const handleConversationGone = useCallback((conversationId: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+    setActiveConversation((prev) => (prev?.id === conversationId ? null : prev));
+  }, []);
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -630,6 +637,7 @@ function InboxPageInner() {
             onUpdateMessage={handleUpdateMessage}
             onStatusChange={handleStatusChange}
             onAssignChange={handleAssignChange}
+            onConversationGone={handleConversationGone}
             onBack={handleCloseConversation}
             resyncToken={resyncToken}
             onRefresh={handleManualRefresh}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { hasMinRole } from "@/lib/auth/roles";
 import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import { presenceLabel } from "@/lib/presence";
@@ -74,6 +75,8 @@ interface MessageThreadProps {
     conversationId: string,
     assignedAgentId: string | null,
   ) => void;
+  /** The conversation left this person's view (she transferred it away). */
+  onConversationGone?: (conversationId: string) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
    * hidden. This callback lets the page deselect the active conversation
@@ -159,6 +162,7 @@ export function MessageThread({
   onUpdateMessage,
   onStatusChange,
   onAssignChange,
+  onConversationGone,
   onBack,
   resyncToken = 0,
   onRefresh,
@@ -169,7 +173,7 @@ export function MessageThread({
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
 
-  const { user } = useAuth();
+  const { user, accountRole } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -849,25 +853,45 @@ export function MessageThread({
     [conversation, user?.id],
   );
 
+  // Hand the conversation to a colleague (or release it). Goes through the
+  // server because an agent who only sees her own chats could not do it with
+  // a plain update: the row would stop being visible to her.
   const handleAssignChange = useCallback(
     async (agentId: string | null) => {
       if (!conversation) return;
 
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("conversations")
-        .update({ assigned_agent_id: agentId })
-        .eq("id", conversation.id);
-
-      if (error) {
-        console.error("Failed to update assignment:", error);
-        toast.error("Failed to update assignment");
+      try {
+        const res = await fetch(`/api/conversations/${conversation.id}/transfer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to_user_id: agentId }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          toast.error(
+            data?.code === "not_owner"
+              ? t("transferNotOwner")
+              : data?.code === "invalid_target"
+                ? t("transferInvalid")
+                : t("transferFailed"),
+          );
+          return;
+        }
+      } catch {
+        toast.error(t("transferFailed"));
         return;
       }
 
+      const target = agentId ? profiles.find((p) => p.user_id === agentId) : null;
+      toast.success(
+        agentId ? t("transferred", { name: target?.full_name ?? "" }) : t("released"),
+      );
       onAssignChange(conversation.id, agentId);
+      // Someone who only sees her own chats loses this one now.
+      const isAdmin = !!accountRole && hasMinRole(accountRole, "admin");
+      if (!isAdmin && agentId !== user?.id) onConversationGone?.(conversation.id);
     },
-    [conversation, onAssignChange],
+    [conversation, onAssignChange, onConversationGone, profiles, accountRole, user?.id, t],
   );
 
   // Empty state — same WhatsApp-style doodle background as the active
@@ -895,6 +919,10 @@ export function MessageThread({
     (s) => s.value === conversation.status
   );
   const assignedAgentId = conversation.assigned_agent_id ?? null;
+  // Who a conversation can be handed to: agents, admins and the owner.
+  const teammates = profiles.filter(
+    (p) => p.account_role === "agent" || p.account_role === "admin" || p.account_role === "owner",
+  );
   const currentAssignee = profiles.find((p) => p.user_id === assignedAgentId);
   const assignLabel = assignedAgentId
     ? (currentAssignee?.full_name ?? t("assigned"))
@@ -1054,13 +1082,16 @@ export function MessageThread({
               align="end"
               className="border-border bg-popover"
             >
-              {profiles.length === 0 ? (
+              {teammates.length === 0 ? (
                 <DropdownMenuItem disabled className="text-sm text-muted-foreground">
                   {t("noTeammates")}
                 </DropdownMenuItem>
               ) : (
-                profiles.map((p) => {
+                teammates.map((p) => {
                   const isSelected = p.user_id === assignedAgentId;
+                  const away =
+                    p.account_role === "agent" &&
+                    (p as { available_for_assignment?: boolean }).available_for_assignment === false;
                   const presence = getPresence(p.user_id);
                   return (
                     <DropdownMenuItem
@@ -1083,6 +1114,9 @@ export function MessageThread({
                       <span className="flex-1">
                         {p.full_name}
                         {p.user_id === user?.id ? t("me") : ""}
+                        {away && (
+                          <span className="ml-2 text-[10px] text-muted-foreground">{t("unavailable")}</span>
+                        )}
                       </span>
                       {isSelected && <Check className="ml-2 h-3 w-3" />}
                     </DropdownMenuItem>
