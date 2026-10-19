@@ -21,6 +21,10 @@ import { isOnDuty, offDutySince, parseSchedule } from '@/lib/ai/schedule'
 //   - only conversations still open or pending and with no owner qualify
 //     (a delivered lead closes its conversation).
 // Assigning a conversation silences the AI agent on it: a person owns it.
+//
+// Besides the recurring rule, an admin can schedule ONE moment
+// (accounts.auto_assign_once_at) at which everything that meets the rule is
+// handed out at once, equally, instead of gradually (runScheduledAssign).
 // ============================================================
 
 
@@ -41,6 +45,54 @@ interface AccountRule {
   auto_assign_cursor: string | null
   auto_assign_max_age_days: number
   auto_assign_batch_per_agent: number
+}
+
+/** The agents who take part in the rotation, in a stable order. */
+async function availableAgents(db: SupabaseClient, accountId: string): Promise<string[]> {
+  const { data } = await db
+    .from('profiles')
+    .select('user_id')
+    .eq('account_id', accountId)
+    .eq('account_role', 'agent')
+    .eq('available_for_assignment', true)
+    .order('created_at', { ascending: true })
+  return ((data ?? []) as { user_id: string }[]).map((r) => r.user_id)
+}
+
+/**
+ * Give each conversation to the next agent in turn. A conversation someone
+ * took meanwhile is left alone. Remembers where the rotation stopped.
+ */
+async function handOut(
+  db: SupabaseClient,
+  accountId: string,
+  ids: string[],
+  agents: string[],
+  cursor: string | null,
+  now: Date,
+): Promise<{ done: number; perAgent: Record<string, number> }> {
+  const turns = roundRobin(agents, cursor, ids.length)
+  const perAgent: Record<string, number> = {}
+  let done = 0
+  let lastAgent: string | null = null
+  for (let i = 0; i < ids.length; i++) {
+    // Guarded on "still unassigned": a person who took it meanwhile wins.
+    const { data: updated } = await db
+      .from('conversations')
+      .update({ assigned_agent_id: turns[done], updated_at: now.toISOString() })
+      .eq('id', ids[i])
+      .is('assigned_agent_id', null)
+      .select('id')
+    if (Array.isArray(updated) && updated.length > 0) {
+      lastAgent = turns[done]
+      perAgent[turns[done]] = (perAgent[turns[done]] ?? 0) + 1
+      done += 1
+    }
+  }
+  if (lastAgent) {
+    await db.from('accounts').update({ auto_assign_cursor: lastAgent }).eq('id', accountId)
+  }
+  return { done, perAgent }
 }
 
 /**
@@ -93,14 +145,7 @@ async function assignForAccount(
   const opened = offDutySince(hours, now)
   if (opened && now.getTime() - opened.getTime() < account.auto_assign_after_minutes * 60_000) return 0
 
-  const { data: agentRows } = await db
-    .from('profiles')
-    .select('user_id')
-    .eq('account_id', account.id)
-    .eq('account_role', 'agent')
-    .eq('available_for_assignment', true)
-    .order('created_at', { ascending: true })
-  const agents = ((agentRows ?? []) as { user_id: string }[]).map((r) => r.user_id)
+  const agents = await availableAgents(db, account.id)
   if (agents.length === 0) return 0
 
   const cutoff = new Date(now.getTime() - account.auto_assign_after_minutes * 60_000).toISOString()
@@ -121,25 +166,127 @@ async function assignForAccount(
   const ids = ((stalled ?? []) as { id: string }[]).map((r) => r.id)
   if (ids.length === 0) return 0
 
-  const turns = roundRobin(agents, account.auto_assign_cursor, ids.length)
-  let done = 0
-  let lastAgent: string | null = null
-  for (let i = 0; i < ids.length; i++) {
-    // Guarded on "still unassigned": a person who took it meanwhile wins.
-    const { data: updated } = await db
-      .from('conversations')
-      .update({ assigned_agent_id: turns[done], updated_at: now.toISOString() })
-      .eq('id', ids[i])
-      .is('assigned_agent_id', null)
-      .select('id')
-    if (Array.isArray(updated) && updated.length > 0) {
-      lastAgent = turns[done]
-      done += 1
-    }
-  }
-
-  if (lastAgent) {
-    await db.from('accounts').update({ auto_assign_cursor: lastAgent }).eq('id', account.id)
-  }
+  const { done } = await handOut(db, account.id, ids, agents, account.auto_assign_cursor, now)
   return done
+}
+
+// ------------------------------------------------------------
+// The one-time scheduled hand-out.
+// ------------------------------------------------------------
+
+const PAGE = 1000
+const MAX_PAGES = 10
+
+/** Open or pending conversations nobody owns that meet the inactivity rule. */
+function stalledFilter(account: AccountRule, now: Date) {
+  return {
+    cutoff: new Date(now.getTime() - account.auto_assign_after_minutes * 60_000).toISOString(),
+    oldest: new Date(now.getTime() - account.auto_assign_max_age_days * 86_400_000).toISOString(),
+  }
+}
+
+/** How many conversations meet the rule right now (for the admin's preview). */
+export async function countEligible(
+  db: SupabaseClient,
+  account: AccountRule,
+  now: Date = new Date(),
+): Promise<number> {
+  const { cutoff, oldest } = stalledFilter(account, now)
+  const { count } = await db
+    .from('conversations')
+    .select('id', { count: 'exact', head: true })
+    .eq('account_id', account.id)
+    .in('status', ['open', 'pending'])
+    .is('assigned_agent_id', null)
+    .not('last_message_at', 'is', null)
+    .lt('last_message_at', cutoff)
+    .gte('last_message_at', oldest)
+  return count ?? 0
+}
+
+export interface ScheduledAssignResult {
+  ran_at: string
+  assigned: number
+  per_agent: Record<string, number>
+  /** Why nothing was assigned, when that is the case. */
+  reason?: 'no_agents' | 'nothing_to_assign' | 'error'
+}
+
+/** Hand out everything that meets the rule, equally, in one go. */
+async function assignEverything(
+  db: SupabaseClient,
+  account: AccountRule,
+  now: Date,
+): Promise<ScheduledAssignResult> {
+  const base = { ran_at: now.toISOString(), assigned: 0, per_agent: {} as Record<string, number> }
+  const agents = await availableAgents(db, account.id)
+  if (agents.length === 0) return { ...base, reason: 'no_agents' }
+
+  const { cutoff, oldest } = stalledFilter(account, now)
+  const ids: string[] = []
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data } = await db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', account.id)
+      .in('status', ['open', 'pending'])
+      .is('assigned_agent_id', null)
+      .not('last_message_at', 'is', null)
+      .lt('last_message_at', cutoff)
+      .gte('last_message_at', oldest)
+      // Freshest first, so everyone gets a mix of recent and older chats.
+      .order('last_message_at', { ascending: false })
+      .range(page * PAGE, page * PAGE + PAGE - 1)
+    const rows = (data ?? []) as { id: string }[]
+    ids.push(...rows.map((r) => r.id))
+    if (rows.length < PAGE) break
+  }
+  if (ids.length === 0) return { ...base, reason: 'nothing_to_assign' }
+
+  const { done, perAgent } = await handOut(db, account.id, ids, agents, account.auto_assign_cursor, now)
+  return { ...base, assigned: done, per_agent: perAgent, ...(done === 0 ? { reason: 'nothing_to_assign' as const } : {}) }
+}
+
+/**
+ * Run the scheduled hand-out of every account whose time has come. The
+ * schedule is cleared first (claimed), so overlapping sweeps cannot run it
+ * twice. Never throws; returns how many conversations were assigned.
+ */
+export async function runScheduledAssign(
+  db: SupabaseClient,
+  now: Date = new Date(),
+): Promise<{ assigned: number }> {
+  let assigned = 0
+  try {
+    const { data: due } = await db
+      .from('accounts')
+      .select(
+        'id, auto_assign_after_minutes, auto_assign_cursor, auto_assign_max_age_days, auto_assign_batch_per_agent, auto_assign_once_at',
+      )
+      .not('auto_assign_once_at', 'is', null)
+      .lte('auto_assign_once_at', now.toISOString())
+
+    for (const account of (due ?? []) as (AccountRule & { auto_assign_once_at: string })[]) {
+      const { data: claimed } = await db
+        .from('accounts')
+        .update({ auto_assign_once_at: null })
+        .eq('id', account.id)
+        .eq('auto_assign_once_at', account.auto_assign_once_at)
+        .select('id')
+      if (!Array.isArray(claimed) || claimed.length === 0) continue
+
+      let result: ScheduledAssignResult
+      try {
+        result = await assignEverything(db, account, now)
+        assigned += result.assigned
+      } catch (err) {
+        console.error(`[scheduled assign] account ${account.id} failed:`, err)
+        result = { ran_at: now.toISOString(), assigned: 0, per_agent: {}, reason: 'error' }
+      }
+      await db.from('accounts').update({ auto_assign_once_result: result }).eq('id', account.id)
+    }
+  } catch (err) {
+    console.error('[scheduled assign] sweep failed:', err)
+  }
+  return { assigned }
 }

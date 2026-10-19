@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { runAutoAssign } from '@/lib/conversations/auto-assign'
+import { runAutoAssign, runScheduledAssign } from '@/lib/conversations/auto-assign'
 import { runRecoveryNudges } from '@/lib/conversations/recovery'
 
 const DEFAULT_PENDING_MINUTES = 30
@@ -13,6 +13,7 @@ const DEFAULT_PENDING_MINUTES = 30
  *     the wait with `CONVERSATION_PENDING_MINUTES`;
  *   - hand stalled conversations to a person, round robin, for accounts
  *     that switched that rule on (Settings > Team);
+ *   - run the one-time scheduled hand-out when its time has come;
  *   - send the recovery message to customers who went quiet, for accounts
  *     that wrote one (Agents > Setup).
  *
@@ -43,12 +44,15 @@ export async function GET(request: Request) {
     console.error('[conversations sweep] failed:', error)
     return NextResponse.json({ error: 'sweep failed' }, { status: 500 })
   }
+  // A scheduled one-time hand-out goes first, then the recurring rule.
+  const scheduled = await runScheduledAssign(supabaseAdmin())
   const { assigned } = await runAutoAssign(supabaseAdmin())
   const { sent } = await runRecoveryNudges(supabaseAdmin())
   return NextResponse.json({
     marked_pending: data ?? 0,
     after_minutes: minutes,
     auto_assigned: assigned,
+    scheduled_assigned: scheduled.assigned,
     recovery_sent: sent,
   })
 }

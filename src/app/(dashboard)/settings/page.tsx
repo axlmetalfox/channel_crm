@@ -19,6 +19,7 @@ import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel'
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
 import { AssignmentRuleCard } from '@/components/settings/assignment-rule';
+import { ScheduledAssignmentCard } from '@/components/settings/scheduled-assignment';
 import { LeadValidationCard } from '@/components/settings/lead-validation';
 import { AgentVisibilityCard } from '@/components/settings/agent-visibility';
 import { MyAvailabilityCard } from '@/components/settings/my-availability';
@@ -98,6 +99,7 @@ function SettingsPageInner() {
       <div className="space-y-6">
         <MembersTab />
         <AssignmentRuleCard />
+        <ScheduledAssignmentCard />
         <AgentVisibilityCard />
         <LeadValidationCard />
       </div>
