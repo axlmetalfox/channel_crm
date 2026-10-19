@@ -1,5 +1,6 @@
 "use client"
 
+import { formatNumber } from '@/lib/currency'
 import { useCallback, useEffect, useState } from 'react'
 import { Bot, CheckCheck, MessageSquare, Percent, Target, UserCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
@@ -90,7 +91,7 @@ export function ConversionSummaryPanel() {
     select(next)
   }
 
-  const percent = (rate: number) => `${(rate * 100).toFixed(1).replace(/\.0$/, '')}%`
+  const percent = (rate: number) => `${formatNumber(rate * 100, 1)}%`
   const today = localDayKey(new Date())
 
   return (
@@ -159,25 +160,25 @@ export function ConversionSummaryPanel() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <MetricCard
                 title={t('incoming')}
-                value={data.incoming.toLocaleString()}
+                value={formatNumber(data.incoming)}
                 icon={MessageSquare}
                 subtitle={t('incomingHint')}
               />
               <MetricCard
                 title={t('converted')}
-                value={data.converted.toLocaleString()}
+                value={formatNumber(data.converted)}
                 icon={CheckCheck}
                 subtitle={t('convertedHint')}
               />
               <MetricCard
                 title={t('byAi')}
-                value={data.byAi.toLocaleString()}
+                value={formatNumber(data.byAi)}
                 icon={Bot}
                 subtitle={t('byAiHint')}
               />
               <MetricCard
                 title={t('byHuman')}
-                value={data.byHuman.toLocaleString()}
+                value={formatNumber(data.byHuman)}
                 icon={UserCheck}
                 subtitle={t('byHumanHint')}
               />

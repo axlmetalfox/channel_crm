@@ -1,5 +1,9 @@
 import { defineConfig } from "vitest/config";
 
+// The business runs on Colombian time (GMT-5): pin it so tests behave the
+// same on every machine, including CI and servers set to UTC.
+process.env.TZ = "America/Bogota";
+
 export default defineConfig({
   resolve: {
     tsconfigPaths: true,

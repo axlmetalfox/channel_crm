@@ -13,6 +13,19 @@
 /** App-wide fallback when no account/deal currency is available. */
 export const DEFAULT_CURRENCY = "USD";
 
+/**
+ * Numbers are always shown the Colombian way: "." for thousands and ","
+ * for decimals (1.234,5), whatever the browser or server language is.
+ */
+export const NUMBER_LOCALE = "es-CO";
+
+/** A number with Colombian separators; whole by default. */
+export function formatNumber(value: number, maxFractionDigits = 0): string {
+  return new Intl.NumberFormat(NUMBER_LOCALE, {
+    maximumFractionDigits: maxFractionDigits,
+  }).format(Number(value) || 0);
+}
+
 export interface CurrencyOption {
   /** ISO-4217 code, e.g. "USD". Stored verbatim in the DB. */
   code: string;
@@ -56,7 +69,7 @@ export const CURRENCIES: CurrencyOption[] = [
  * NO DB CHECK (only `accounts.default_currency` does), so legacy
  * rows, imports, or hand-edited data can hold malformed values like
  * "United States". We never let that crash a render — on a bad code
- * we fall back to "CODE 1,234".
+ * we fall back to "CODE 1.234".
  */
 export function formatCurrency(
   value: number,
@@ -65,7 +78,7 @@ export function formatCurrency(
   const code = (currency || DEFAULT_CURRENCY).trim();
   const amount = Number(value) || 0;
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(NUMBER_LOCALE, {
       style: "currency",
       currency: code,
       minimumFractionDigits: 0,
@@ -74,15 +87,13 @@ export function formatCurrency(
   } catch {
     // Invalid ISO code — show the raw code + grouped number so the
     // value is still legible instead of throwing.
-    return `${code} ${new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: 0,
-    }).format(amount)}`;
+    return `${code} ${formatNumber(amount)}`;
   }
 }
 
 /**
  * Compact currency for tight spaces (donut center, legend rows):
- * "$1.2M" / "€34.5k" / "₹900". Uses the currency's symbol from
+ * "$1,2M" / "€34,5k" / "₹900". Uses the currency's symbol from
  * CURRENCIES, falling back to the code when we don't carry a symbol.
  */
 export function formatCurrencyShort(
@@ -95,13 +106,18 @@ export function formatCurrencyShort(
 }
 
 /**
- * Compact number for tight spaces (chart tiles, legends): 1_234 → "1.2k",
- * 1_200_000 → "1.2M", 900 → "900". The unit-less core shared with
+ * Compact number for tight spaces (chart tiles, legends): 1_234 → "1,2k",
+ * 1_200_000 → "1,2M", 900 → "900". The unit-less core shared with
  * {@link formatCurrencyShort}.
  */
 export function formatCompactNumber(value: number): string {
   const v = Number(value || 0);
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  const one = (n: number) =>
+    new Intl.NumberFormat(NUMBER_LOCALE, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(n);
+  if (v >= 1_000_000) return `${one(v / 1_000_000)}M`;
+  if (v >= 1_000) return `${one(v / 1_000)}k`;
   return v.toFixed(0);
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatNumber } from '@/lib/currency'
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -271,7 +272,7 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
                     <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                       <span>
                         {deal.currency ?? "$"}
-                        {deal.value.toLocaleString()}
+                        {formatNumber(deal.value)}
                       </span>
                       {deal.stage && (
                         <span
