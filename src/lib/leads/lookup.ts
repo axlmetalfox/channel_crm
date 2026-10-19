@@ -329,6 +329,7 @@ interface RememberedLead {
   whatsapp_number: string | null
   country: string | null
   city: string | null
+  department?: string | null
 }
 
 /**
@@ -360,6 +361,7 @@ export async function previousLeadDetails(
     whatsapp_number: lead.whatsapp_number ?? null,
     country: lead.country ?? null,
     city: lead.city ?? null,
+    department: lead.department ?? null,
   }
 }
 
@@ -393,5 +395,6 @@ export function fillLeadFromRemembered(lead: Lead, previous: RememberedLead): Le
   out.whatsapp_number = out.whatsapp_number ?? previous.whatsapp_number
   out.country = out.country ?? previous.country
   out.city = out.city ?? previous.city
+  out.department = out.department ?? previous.department ?? null
   return out
 }

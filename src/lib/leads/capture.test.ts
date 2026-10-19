@@ -112,6 +112,7 @@ const LEAD: Lead = {
   contact_phone: null,
   country: 'Colombia',
   city: 'Medellín',
+  department: null,
   request_summary: 'Empacadora al vacío',
   request_type: 'maquina_nueva',
   consent_given: true,

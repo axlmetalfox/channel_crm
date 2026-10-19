@@ -31,6 +31,7 @@ export const LEAD_EXTRACTION_SCHEMA = {
     contact_phone: nullableString,
     country: nullableString,
     city: nullableString,
+    department: nullableString,
     request_summary: { type: 'string' },
     request_type: { type: 'string', enum: [...LEAD_REQUEST_TYPES] },
     consent_given: { type: 'boolean' },
@@ -45,6 +46,7 @@ export const LEAD_EXTRACTION_SCHEMA = {
     'contact_phone',
     'country',
     'city',
+    'department',
     'request_summary',
     'request_type',
     'consent_given',
@@ -61,6 +63,7 @@ export const LEAD_EXTRACTION_PROMPT =
   'whatsapp_number is the number the customer confirmed as their WhatsApp, in international format with "+" and country code. ' +
   'contact_phone is their phone for a call: if they said it is the same as the WhatsApp number, repeat the WhatsApp number; otherwise the number they gave. ' +
   'country and city as the customer wrote them. ' +
+  'department is the Colombian department (state) of that city as the customer wrote it ("Antioquia", "Valle del Cauca", "Bogotá"…); null when they did not say it and it is not a foreign customer. ' +
   "request_summary is 1-3 sentences in the customer's language describing what they need (product, presentation, machine or part, speed or other specifics), written from the conversation only. " +
   'request_type is one of: maquina_nueva (wants to buy a machine), info_maquina (asks about a specific machine or reference), alquiler (wants to rent), repuestos (needs spare parts), servicio_tecnico (needs repair or technical service). ' +
   'consent_given is true only if the customer explicitly agreed to personal-data processing.'
@@ -76,6 +79,8 @@ export interface Lead {
   contact_phone: string | null
   country: string | null
   city: string | null
+  /** Colombian department (state) of the city. */
+  department: string | null
   request_summary: string
   request_type: LeadRequestType
   consent_given: boolean
@@ -122,6 +127,7 @@ export function parseLead(raw: unknown): Lead | null {
     contact_phone: normalizeContactPhone(withCountryCode(r.contact_phone, country)),
     country,
     city: cleanText(r.city),
+    department: cleanText(r.department),
     request_summary: summary,
     request_type: requestType,
     consent_given: r.consent_given === true,

@@ -86,3 +86,12 @@ describe('missingManualFields', () => {
     ])
   })
 })
+
+describe('department', () => {
+  it('is checked like the city: accepted when proposed or written by the customer, rejected otherwise', () => {
+    const withDept = { ...base, department: 'Valle del Cauca' }
+    expect(unverifiedFields(withDept, withDept, [])).toEqual([])
+    expect(unverifiedFields({ ...withDept, department: 'Antioquia' }, withDept, ['estoy en Medellín, Antioquia'])).toEqual([])
+    expect(unverifiedFields({ ...withDept, department: 'Santander' }, withDept, ['estoy en Cali'])).toEqual(['department'])
+  })
+})

@@ -156,6 +156,118 @@ export async function sendZernioAttachment(args: {
   return { messageId }
 }
 
+/** A WhatsApp message template as Zernio reads it from Meta. */
+export interface ZernioTemplate {
+  id: string
+  name: string
+  language: string
+  status: string
+  category: string
+  components?: {
+    type: string
+    text?: string
+    format?: string
+    buttons?: { type: string; text: string; url?: string; phone_number?: string; example?: string[] | string }[]
+    example?: { header_text?: string[]; header_handle?: string[]; body_text?: string[][] }
+  }[]
+}
+
+/** Every template of the connected WhatsApp account (one entry per name + language). */
+export async function listZernioTemplates(args: {
+  apiKey: string
+  accountId: string
+}): Promise<ZernioTemplate[]> {
+  const res = await zernioRequest<{ templates?: ZernioTemplate[] }>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/whatsapp/templates?accountId=${encodeURIComponent(args.accountId)}`,
+  })
+  return res.templates ?? []
+}
+
+/**
+ * Send an approved template inside a conversation the customer already has
+ * with us (Zernio keeps the thread). `bodyParams` fill {{1}}, {{2}}… in order.
+ */
+export async function sendZernioTemplate(args: {
+  apiKey: string
+  accountId: string
+  conversationId: string
+  name: string
+  language: string
+  bodyParams: string[]
+  idempotencyKey?: string
+}): Promise<{ messageId: string }> {
+  const res = await zernioRequest<{ data?: { messageId?: string } }>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: `/inbox/conversations/${encodeURIComponent(args.conversationId)}/messages`,
+    body: {
+      accountId: args.accountId,
+      template: {
+        elements: [
+          {
+            name: args.name,
+            language: args.language,
+            ...(args.bodyParams.length
+              ? {
+                  components: [
+                    {
+                      type: 'body',
+                      parameters: args.bodyParams.map((text) => ({ type: 'text', text })),
+                    },
+                  ],
+                }
+              : {}),
+          },
+        ],
+      },
+    },
+    idempotencyKey: args.idempotencyKey,
+  })
+  const messageId = res.data?.messageId
+  if (!messageId) {
+    throw new ZernioError('Zernio accepted the template but returned no id.', 502)
+  }
+  return { messageId }
+}
+
+/**
+ * Open a conversation with a phone number that has no thread yet, by sending
+ * an approved template (the only thing WhatsApp allows outside the 24h
+ * window). `participantId` is digits with country code, no "+". Returns the
+ * new Zernio conversation id plus the message id.
+ */
+export async function startZernioConversation(args: {
+  apiKey: string
+  accountId: string
+  phone: string
+  name: string
+  language: string
+  bodyParams: string[]
+  idempotencyKey?: string
+}): Promise<{ messageId: string; conversationId: string }> {
+  const res = await zernioRequest<{ data?: { messageId?: string; conversationId?: string } }>({
+    apiKey: args.apiKey,
+    method: 'POST',
+    path: '/inbox/conversations',
+    body: {
+      accountId: args.accountId,
+      participantId: args.phone.replace(/\D/g, ''),
+      templateName: args.name,
+      templateLanguage: args.language,
+      templateParams: args.bodyParams,
+    },
+    idempotencyKey: args.idempotencyKey,
+  })
+  const messageId = res.data?.messageId
+  const conversationId = res.data?.conversationId
+  if (!messageId || !conversationId) {
+    throw new ZernioError('Zernio accepted the template but returned no conversation.', 502)
+  }
+  return { messageId, conversationId }
+}
+
 export interface ZernioAccountHealth {
   accountId: string
   platform: string | null

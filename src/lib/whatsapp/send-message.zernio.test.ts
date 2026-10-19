@@ -4,11 +4,16 @@ const h = vi.hoisted(() => ({
   loadZernioConfig: vi.fn(),
   sendTextViaZernio: vi.fn(),
   sendMedia: vi.fn(),
+  sendTemplate: vi.fn(),
   pausedFlows: [] as string[],
 }))
 
 vi.mock('@/lib/zernio/config', () => ({ loadZernioConfig: h.loadZernioConfig }))
-vi.mock('@/lib/zernio/send', () => ({ sendTextViaZernio: h.sendTextViaZernio, sendMediaViaZernio: h.sendMedia }))
+vi.mock('@/lib/zernio/send', () => ({
+  sendTextViaZernio: h.sendTextViaZernio,
+  sendMediaViaZernio: h.sendMedia,
+  sendTemplateViaZernio: h.sendTemplate,
+}))
 vi.mock('@/lib/flows/admin-client', () => ({
   supabaseAdmin: () => ({
     from: () => {
@@ -46,6 +51,7 @@ beforeEach(() => {
   h.loadZernioConfig.mockResolvedValue({ apiKey: 'sk_x', zernioAccountId: 'zacc' })
   h.sendTextViaZernio.mockResolvedValue({ whatsapp_message_id: 'zmsg-9', message_id: 'm-9' })
   h.sendMedia.mockResolvedValue({ whatsapp_message_id: 'zmsg-img', message_id: 'm-img' })
+  h.sendTemplate.mockResolvedValue({ whatsapp_message_id: 'zmsg-tpl', message_id: 'm-tpl' })
 })
 
 describe('sendMessageToConversation on an account that uses Zernio', () => {
@@ -83,16 +89,37 @@ describe('sendMessageToConversation on an account that uses Zernio', () => {
     expect(h.pausedFlows.length).toBeGreaterThan(0)
   })
 
-  it('still refuses templates and buttons, and says so plainly', async () => {
+  it('sends an approved template through Zernio with its values and rendered text', async () => {
+    const out = await sendMessageToConversation(db, 'acct-1', {
+      conversationId: 'cv-1',
+      messageType: 'template',
+      templateName: 'retomar_solicitud',
+      templateLanguage: 'es',
+      templateParams: ['Carlos'],
+      contentText: 'Buen día, señor(a) Carlos.',
+    })
+    expect(out).toEqual({ messageId: 'm-tpl', whatsappMessageId: 'zmsg-tpl' })
+    expect(h.sendTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateName: 'retomar_solicitud',
+        language: 'es',
+        bodyParams: ['Carlos'],
+        renderedText: 'Buen día, señor(a) Carlos.',
+      }),
+    )
+    expect(h.sendTextViaZernio).not.toHaveBeenCalled()
+  })
+
+  it('still refuses buttons (interactive messages), and says so plainly', async () => {
     await expect(
       sendMessageToConversation(db, 'acct-1', {
         conversationId: 'cv-1',
-        messageType: 'template',
-        templateName: 'saludo',
+        messageType: 'interactive',
+        interactivePayload: { kind: 'buttons', body: 'x', buttons: [{ id: '1', title: 'a' }] } as never,
       }),
-    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/not templates/i) })
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/not buttons/i) })
     expect(h.sendTextViaZernio).not.toHaveBeenCalled()
-    expect(h.sendMedia).not.toHaveBeenCalled()
+    expect(h.sendTemplate).not.toHaveBeenCalled()
   })
 
   it('turns a Zernio rejection (for example the 24h window) into a readable 400', async () => {

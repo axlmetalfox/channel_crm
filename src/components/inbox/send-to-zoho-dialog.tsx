@@ -48,6 +48,7 @@ interface LeadForm {
   contact_phone: string;
   country: string;
   city: string;
+  department: string;
   request_summary: string;
   request_type: string;
   notes: string;
@@ -82,6 +83,7 @@ const EMPTY: LeadForm = {
   contact_phone: "",
   country: "",
   city: "",
+  department: "",
   request_summary: "",
   request_type: "maquina_nueva",
   notes: "",
@@ -105,6 +107,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
   contact_phone: "contactPhone",
   country: "country",
   city: "city",
+  department: "department",
 };
 
 interface Props {
@@ -371,6 +374,7 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
               {field("contact_phone", t("contactPhone"))}
               {field("country", t("country"))}
               {field("city", t("city"))}
+              {field("department", t("department"))}
             </div>
 
             <div className="space-y-1.5">

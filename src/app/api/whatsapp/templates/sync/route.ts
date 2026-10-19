@@ -5,9 +5,15 @@ import {
   requireRole,
   toErrorResponse,
 } from '@/lib/auth/account'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
-import type { TemplateButton, TemplateSampleValues } from '@/types'
+import {
+  syncZernioTemplates,
+  upsertTemplates,
+  type MetaTemplate,
+} from '@/lib/whatsapp/template-sync'
+import { listZernioTemplates, ZernioError } from '@/lib/zernio/client'
+import { loadZernioConfig } from '@/lib/zernio/config'
 
 /**
  * Sync message templates from Meta → local message_templates table.
@@ -25,108 +31,6 @@ import type { TemplateButton, TemplateSampleValues } from '@/types'
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
-interface MetaButton {
-  type: string
-  text: string
-  url?: string
-  phone_number?: string
-  example?: string[] | string
-}
-
-interface MetaTemplateComponent {
-  type: string
-  text?: string
-  format?: string
-  buttons?: MetaButton[]
-  example?: {
-    header_text?: string[]
-    header_handle?: string[]
-    body_text?: string[][]
-  }
-}
-
-interface MetaTemplate {
-  id: string
-  name: string
-  language: string
-  status: string
-  category: string
-  components?: MetaTemplateComponent[]
-  quality_score?: { score?: string } | string
-}
-
-function normalizeCategory(
-  meta: string,
-): 'Marketing' | 'Utility' | 'Authentication' {
-  const upper = meta.toUpperCase()
-  if (upper === 'UTILITY') return 'Utility'
-  if (upper === 'AUTHENTICATION') return 'Authentication'
-  return 'Marketing'
-}
-
-function normalizeQualityScore(
-  raw: MetaTemplate['quality_score'],
-): 'GREEN' | 'YELLOW' | 'RED' | null {
-  const score =
-    typeof raw === 'string' ? raw : raw?.score ? String(raw.score) : null
-  if (!score) return null
-  const upper = score.toUpperCase()
-  return upper === 'GREEN' || upper === 'YELLOW' || upper === 'RED'
-    ? (upper as 'GREEN' | 'YELLOW' | 'RED')
-    : null
-}
-
-function parseButtons(metaButtons: MetaButton[] | undefined): TemplateButton[] {
-  if (!metaButtons?.length) return []
-  const out: TemplateButton[] = []
-  for (const b of metaButtons) {
-    switch (b.type?.toUpperCase()) {
-      case 'QUICK_REPLY':
-        out.push({ type: 'QUICK_REPLY', text: b.text })
-        break
-      case 'URL':
-        out.push({
-          type: 'URL',
-          text: b.text,
-          url: b.url ?? '',
-          example: Array.isArray(b.example) ? b.example[0] : b.example,
-        })
-        break
-      case 'PHONE_NUMBER':
-        out.push({
-          type: 'PHONE_NUMBER',
-          text: b.text,
-          phone_number: b.phone_number ?? '',
-        })
-        break
-      case 'COPY_CODE':
-        out.push({
-          type: 'COPY_CODE',
-          text: b.text,
-          example: Array.isArray(b.example) ? b.example[0] ?? '' : b.example ?? '',
-        })
-        break
-      // OTP, FLOW, etc — out of scope for v1; drop silently.
-    }
-  }
-  return out
-}
-
-function extractSampleValues(
-  body: MetaTemplateComponent | undefined,
-  header: MetaTemplateComponent | undefined,
-): TemplateSampleValues | null {
-  // Meta returns body_text as a 2D array — one row per example set.
-  // We take the first row (most templates have exactly one).
-  const bodySample = body?.example?.body_text?.[0]
-  const headerSample = header?.example?.header_text
-  if (!bodySample?.length && !headerSample?.length) return null
-  const sv: TemplateSampleValues = {}
-  if (bodySample?.length) sv.body = bodySample
-  if (headerSample?.length) sv.header = headerSample
-  return sv
-}
-
 export async function POST() {
   try {
     // Syncing rewrites the account-wide template catalog, which is
@@ -134,6 +38,27 @@ export async function POST() {
     // insert/update RLS policies (migration 017) both require 'admin'.
     // Resolving account_id off the profile only proved membership.
     const { supabase, accountId, userId } = await requireRole('admin')
+
+    // Accounts connected through Zernio: Zernio reads the templates from Meta.
+    const zernio = await loadZernioConfig(supabaseAdmin(), accountId)
+    if (zernio) {
+      try {
+        const r = await syncZernioTemplates(supabaseAdmin(), zernio, async (args) =>
+          (await listZernioTemplates(args)) as unknown as MetaTemplate[],
+        )
+        return NextResponse.json({
+          success: r.errors.length === 0,
+          total: r.total,
+          inserted: r.inserted,
+          updated: r.updated,
+          errors: r.errors,
+          truncated: false,
+        })
+      } catch (err) {
+        const message = err instanceof ZernioError ? err.message : 'Could not read the templates from Zernio'
+        return NextResponse.json({ error: message }, { status: 502 })
+      }
+    }
 
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
@@ -195,96 +120,12 @@ export async function POST() {
       nextUrl = metaBody.paging?.next ?? null
     }
 
-    let inserted = 0
-    let updated = 0
-    const errors: { name: string; language: string; message: string }[] = []
-
-    for (const t of metaTemplates) {
-      const body = (t.components ?? []).find((c) => c.type === 'BODY')
-      const header = (t.components ?? []).find((c) => c.type === 'HEADER')
-      const footer = (t.components ?? []).find((c) => c.type === 'FOOTER')
-      const buttons = (t.components ?? []).find((c) => c.type === 'BUTTONS')
-
-      const parsedButtons = parseButtons(buttons?.buttons)
-      const sampleValues = extractSampleValues(body, header)
-
-      const headerFormat = header?.format?.toUpperCase()
-      const headerType =
-        headerFormat === 'TEXT' ||
-        headerFormat === 'IMAGE' ||
-        headerFormat === 'VIDEO' ||
-        headerFormat === 'DOCUMENT'
-          ? headerFormat.toLowerCase()
-          : null
-
-      const row = {
-        // Account tenancy + user audit, same split as the submit
-        // route. account_id is NOT NULL on message_templates
-        // post-017, so an INSERT without it errors.
-        account_id: accountId,
-        user_id: userId,
-        name: t.name,
-        category: normalizeCategory(t.category),
-        language: t.language,
-        header_type: headerType,
-        header_content: header?.text ?? null,
-        header_handle: header?.example?.header_handle?.[0] ?? null,
-        body_text: body?.text ?? '',
-        footer_text: footer?.text ?? null,
-        buttons: parsedButtons.length ? parsedButtons : null,
-        sample_values: sampleValues,
-        status: normalizeStatus(t.status),
-        meta_template_id: t.id,
-        quality_score: normalizeQualityScore(t.quality_score),
-        updated_at: new Date().toISOString(),
-      }
-
-      const { data: existing, error: lookupErr } = await supabase
-        .from('message_templates')
-        .select('id')
-        .eq('account_id', accountId)
-        .eq('name', t.name)
-        .eq('language', t.language)
-        .maybeSingle()
-
-      if (lookupErr) {
-        errors.push({
-          name: t.name,
-          language: t.language,
-          message: lookupErr.message,
-        })
-        continue
-      }
-
-      if (existing?.id) {
-        const { error: updErr } = await supabase
-          .from('message_templates')
-          .update(row)
-          .eq('id', existing.id)
-        if (updErr) {
-          errors.push({
-            name: t.name,
-            language: t.language,
-            message: updErr.message,
-          })
-        } else {
-          updated++
-        }
-      } else {
-        const { error: insErr } = await supabase
-          .from('message_templates')
-          .insert(row)
-        if (insErr) {
-          errors.push({
-            name: t.name,
-            language: t.language,
-            message: insErr.message,
-          })
-        } else {
-          inserted++
-        }
-      }
-    }
+    const { inserted, updated, errors } = await upsertTemplates(
+      supabase,
+      accountId,
+      userId,
+      metaTemplates,
+    )
 
     return NextResponse.json({
       success: errors.length === 0,

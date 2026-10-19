@@ -139,6 +139,7 @@ function editableFields(lead: Lead): EditableLead {
     contact_phone: lead.contact_phone,
     country: lead.country,
     city: lead.city,
+    department: lead.department,
     request_summary: lead.request_summary,
     request_type: lead.request_type,
   }
@@ -288,6 +289,7 @@ export async function submitManualLead(
     contact_phone: e.contact_phone,
     country: e.country,
     city: e.city,
+    department: e.department,
     request_summary: e.request_summary,
     request_type: LEAD_REQUEST_TYPES.find((t) => t === e.request_type),
     consent_given: consent,

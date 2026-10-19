@@ -238,6 +238,7 @@
       "contactPhone": "Teléfono de contacto",
       "country": "País",
       "city": "Ciudad",
+      "department": "Departamento",
       "requestType": "Tipo de solicitud",
       "requestSummary": "Requerimiento",
       "type_maquina_nueva": "Máquina nueva",

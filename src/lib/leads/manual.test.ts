@@ -41,6 +41,7 @@ const EXTRACTED: Lead = {
   contact_phone: null,
   country: 'Colombia',
   city: null,
+  department: null,
   request_summary: 'Empacadora de sachets',
   request_type: 'maquina_nueva',
   consent_given: true,

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { sendZernioAttachment, sendZernioText } from './client'
+import { sendZernioAttachment, sendZernioTemplate, sendZernioText, startZernioConversation } from './client'
 import type { ZernioConfig } from './config'
 
 /**
@@ -139,6 +139,97 @@ export async function sendMediaViaZernio(args: {
   await db
     .from('conversations')
     .update({ last_message_text: shownText || `[${kind}]`, last_message_at: now, updated_at: now })
+    .eq('id', conversationId)
+
+  return { whatsapp_message_id: messageId, message_id: (row as { id: string }).id }
+}
+
+/**
+ * Send an approved WhatsApp template and persist it like the other paths.
+ *
+ * A template is the only message WhatsApp allows outside the 24h window, and
+ * the only way to reach a customer who has no Zernio thread yet (a chat
+ * imported from another system, or a customer who never wrote to this
+ * number): then the conversation is OPENED by phone number and the new
+ * Zernio conversation id is saved on the TUYO conversation, so everything
+ * after (the customer's reply, free text inside the window) works as usual.
+ */
+export async function sendTemplateViaZernio(args: {
+  db: SupabaseClient
+  config: ZernioConfig
+  conversationId: string
+  templateName: string
+  language: string
+  /** Values for {{1}}, {{2}}… in order. */
+  bodyParams: string[]
+  /** The template body with the values filled in, as shown in the inbox. */
+  renderedText: string
+  idempotencyKey?: string
+}): Promise<{ whatsapp_message_id: string; message_id: string }> {
+  const { db, config, conversationId, templateName, language, bodyParams, renderedText } = args
+
+  const { data: conv, error } = await db
+    .from('conversations')
+    .select('zernio_conversation_id, contact:contacts(phone)')
+    .eq('id', conversationId)
+    .maybeSingle()
+  if (error) throw error
+  const zernioConversationId = conv?.zernio_conversation_id as string | null | undefined
+  const contact = conv?.contact as { phone?: string | null } | { phone?: string | null }[] | null | undefined
+  const phone = (Array.isArray(contact) ? contact[0]?.phone : contact?.phone) ?? ''
+
+  let messageId: string
+  if (zernioConversationId) {
+    ;({ messageId } = await sendZernioTemplate({
+      apiKey: config.apiKey,
+      accountId: config.zernioAccountId,
+      conversationId: zernioConversationId,
+      name: templateName,
+      language,
+      bodyParams,
+      idempotencyKey: args.idempotencyKey,
+    }))
+  } else {
+    if (!phone.replace(/\D/g, '')) {
+      throw new Error('This customer has no visible phone number, so a new chat cannot be started with a template.')
+    }
+    const started = await startZernioConversation({
+      apiKey: config.apiKey,
+      accountId: config.zernioAccountId,
+      phone,
+      name: templateName,
+      language,
+      bodyParams,
+      idempotencyKey: args.idempotencyKey,
+    })
+    messageId = started.messageId
+    await db
+      .from('conversations')
+      .update({ zernio_conversation_id: started.conversationId })
+      .eq('id', conversationId)
+  }
+
+  const { data: row, error: msgErr } = await db
+    .from('messages')
+    .insert({
+      conversation_id: conversationId,
+      sender_type: 'agent',
+      content_type: 'template',
+      content_text: renderedText,
+      template_name: templateName,
+      message_id: messageId,
+      status: 'sent',
+    })
+    .select('id')
+    .single()
+  if (msgErr || !row) {
+    throw new Error(`sent through Zernio but DB insert failed: ${msgErr?.message ?? 'no row'}`)
+  }
+
+  const now = new Date().toISOString()
+  await db
+    .from('conversations')
+    .update({ last_message_text: renderedText, last_message_at: now, updated_at: now })
     .eq('id', conversationId)
 
   return { whatsapp_message_id: messageId, message_id: (row as { id: string }).id }

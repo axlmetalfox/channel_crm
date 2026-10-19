@@ -238,6 +238,7 @@
       "contactPhone": "연락 전화번호",
       "country": "국가",
       "city": "도시",
+      "department": "주(도)",
       "requestType": "요청 유형",
       "requestSummary": "요청 내용",
       "type_maquina_nueva": "신규 기계",

@@ -37,7 +37,12 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { loadZernioConfig } from '@/lib/zernio/config';
-import { sendMediaViaZernio, sendTextViaZernio, type ZernioMediaKind } from '@/lib/zernio/send';
+import {
+  sendMediaViaZernio,
+  sendTemplateViaZernio,
+  sendTextViaZernio,
+  type ZernioMediaKind,
+} from '@/lib/zernio/send';
 import { ZernioError } from '@/lib/zernio/client';
 import {
   sanitizePhoneForMeta,
@@ -245,15 +250,25 @@ export async function sendMessageToConversation(
   const zernio = await loadZernioConfig(supabaseAdmin(), accountId);
   if (zernio) {
     const isFile = (MEDIA_KINDS as readonly string[]).includes(messageType);
-    if (messageType !== 'text' && !isFile) {
+    if (messageType !== 'text' && messageType !== 'template' && !isFile) {
       throw new SendMessageError(
         'bad_request',
-        'This account sends through Zernio, which supports text and files (photos, videos, audio, documents) from the inbox, not templates or buttons yet.',
+        'This account sends through Zernio, which supports text, templates and files (photos, videos, audio, documents) from the inbox, not buttons yet.',
         400
       );
     }
     try {
-      const sent = isFile
+      const sent = messageType === 'template'
+        ? await sendTemplateViaZernio({
+            db: supabaseAdmin(),
+            config: zernio,
+            conversationId,
+            templateName: templateName as string,
+            language: templateLanguage || 'es',
+            bodyParams: Array.isArray(templateParams) ? templateParams.map(String) : [],
+            renderedText: contentText || `[${templateName}]`,
+          })
+        : isFile
         ? await sendMediaViaZernio({
             db: supabaseAdmin(),
             config: zernio,

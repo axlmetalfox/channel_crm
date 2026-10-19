@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { runAutoAssign, runScheduledAssign } from '@/lib/conversations/auto-assign'
 import { runRecoveryNudges } from '@/lib/conversations/recovery'
+import { runZernioTemplateSync } from '@/lib/zernio/template-sweep'
 
 const DEFAULT_PENDING_MINUTES = 30
 
@@ -14,6 +15,7 @@ const DEFAULT_PENDING_MINUTES = 30
  *   - hand stalled conversations to a person, round robin, for accounts
  *     that switched that rule on (Settings > Team);
  *   - run the one-time scheduled hand-out when its time has come;
+ *   - refresh the WhatsApp template catalog from Meta (through Zernio);
  *   - send the recovery message to customers who went quiet, for accounts
  *     that wrote one (Agents > Setup).
  *
@@ -48,6 +50,7 @@ export async function GET(request: Request) {
   const scheduled = await runScheduledAssign(supabaseAdmin())
   const { assigned } = await runAutoAssign(supabaseAdmin())
   const { sent } = await runRecoveryNudges(supabaseAdmin())
+  await runZernioTemplateSync(supabaseAdmin())
   return NextResponse.json({
     marked_pending: data ?? 0,
     after_minutes: minutes,

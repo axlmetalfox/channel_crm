@@ -377,6 +377,7 @@ async function buildPayload(
       contact_phone: lead.contact_phone ?? lead.whatsapp_number,
       country: lead.country,
       city: lead.city,
+      department: lead.department,
       request_summary: lead.request_summary,
       request_type: lead.request_type,
     },

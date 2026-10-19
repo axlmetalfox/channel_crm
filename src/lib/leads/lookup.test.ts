@@ -158,6 +158,7 @@ describe('fillLeadFromRecord', () => {
     contact_phone: null,
     country: null,
     city: null,
+    department: null,
     request_summary: 'x',
     request_type: 'repuestos',
     consent_given: true,

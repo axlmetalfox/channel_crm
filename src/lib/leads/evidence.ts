@@ -25,10 +25,11 @@ export const VERIFIED_FIELDS = [
   'contact_phone',
   'country',
   'city',
+  'department',
 ] as const
 export type VerifiedField = (typeof VERIFIED_FIELDS)[number]
 
-type Fields = Pick<Lead, VerifiedField>
+type Fields = Pick<Lead, Exclude<VerifiedField, 'department'>> & { department?: string | null }
 
 /** Lower-case, no accents, punctuation turned into single spaces. */
 function words(text: string): string {
