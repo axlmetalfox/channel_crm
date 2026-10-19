@@ -20,6 +20,7 @@ import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
 import { AssignmentRuleCard } from '@/components/settings/assignment-rule';
 import { LeadValidationCard } from '@/components/settings/lead-validation';
+import { MyAvailabilityCard } from '@/components/settings/my-availability';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import {
   resolveSection,
@@ -74,7 +75,12 @@ function SettingsPageInner() {
 
   const panel: Record<SettingsSection, ReactNode> = {
     overview: <SettingsOverview onSelect={go} />,
-    profile: <ProfileForm />,
+    profile: (
+      <div className="space-y-6">
+        <ProfileForm />
+        <MyAvailabilityCard />
+      </div>
+    ),
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: (

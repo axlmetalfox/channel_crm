@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Bot, Sparkles, Settings2, BarChart3 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -15,13 +16,21 @@ type Tab = 'playground' | 'setup' | 'usage';
 
 export default function AgentsPage() {
   const t = useTranslations('AgentsPage');
-  const { accountRole } = useAuth();
+  const router = useRouter();
+  const { accountRole, profileLoading } = useAuth();
   const canViewUsage = accountRole ? canEditSettings(accountRole) : false;
+  // The agent's prompt, keys and settings are for admins: anyone else who
+  // opens this address is sent back to the inbox.
+  const blocked = !profileLoading && !canViewUsage;
+  useEffect(() => {
+    if (blocked) router.replace('/inbox');
+  }, [blocked, router]);
   const [tab, setTab] = useState<Tab>('playground');
   const [decided, setDecided] = useState(false);
 
   // Land first-time users on Setup, returning users on the Playground.
   useEffect(() => {
+    if (!canViewUsage) return;
     let cancelled = false;
     (async () => {
       try {
@@ -37,7 +46,9 @@ export default function AgentsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewUsage]);
+
+  if (!canViewUsage) return null;
 
   return (
     <div>

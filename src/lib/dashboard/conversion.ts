@@ -358,16 +358,17 @@ async function loadAssignments(
   start: Date,
   end: Date,
   leads: LeadRow[],
+  agentId?: string,
 ): Promise<AssignmentRow[]> {
-  const inRange = await fetchAll<AssignmentRow>((a, b) =>
-    db
+  const inRange = await fetchAll<AssignmentRow>((a, b) => {
+    let q = db
       .from('conversation_assignments')
       .select('conversation_id, agent_id, assigned_at')
       .gte('assigned_at', start.toISOString())
       .lt('assigned_at', end.toISOString())
-      .order('assigned_at', { ascending: true })
-      .range(a, b),
-  )
+    if (agentId) q = q.eq('agent_id', agentId)
+    return q.order('assigned_at', { ascending: true }).range(a, b)
+  })
   const have = new Set(inRange.map((r) => r.conversation_id))
   const ids = [
     ...new Set(
@@ -380,14 +381,14 @@ async function loadAssignments(
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
     rows.push(
-      ...(await fetchAll<AssignmentRow>((a, b) =>
-        db
+      ...(await fetchAll<AssignmentRow>((a, b) => {
+        let q = db
           .from('conversation_assignments')
           .select('conversation_id, agent_id, assigned_at')
           .in('conversation_id', chunk)
-          .order('assigned_at', { ascending: true })
-          .range(a, b),
-      )),
+        if (agentId) q = q.eq('agent_id', agentId)
+        return q.order('assigned_at', { ascending: true }).range(a, b)
+      })),
     )
   }
   return rows
@@ -399,6 +400,7 @@ async function loadCohortLeads(
   assignments: AssignmentRow[],
   start: Date,
   end: Date,
+  agentId?: string,
 ): Promise<{ conversation_id: string | null; created_by_user_id: string | null }[]> {
   const ids = [
     ...new Set(
@@ -414,16 +416,16 @@ async function loadCohortLeads(
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
     out.push(
-      ...(await fetchAll<{ conversation_id: string | null; created_by_user_id: string | null }>((a, b) =>
-        db
+      ...(await fetchAll<{ conversation_id: string | null; created_by_user_id: string | null }>((a, b) => {
+        let q = db
           .from('lead_intakes')
           .select('conversation_id, created_by_user_id')
           .eq('source', 'manual')
           .in('status', REGISTERED_STATUSES)
           .in('conversation_id', chunk)
-          .order('created_at', { ascending: true })
-          .range(a, b),
-      )),
+        if (agentId) q = q.eq('created_by_user_id', agentId)
+        return q.order('created_at', { ascending: true }).range(a, b)
+      })),
     )
   }
   return out
@@ -448,4 +450,107 @@ async function loadNames(
     if (p.full_name) names[p.user_id] = p.full_name
   }
   return names
+}
+
+// ------------------------------------------------------------
+// An agent's own numbers. Agents never see the account's totals, the other
+// agents or the AI's results: only the chats assigned to them and the leads
+// they sent. The database enforces the same limits (migration 060).
+// ------------------------------------------------------------
+
+export interface MyConversionDay {
+  day: string // YYYY-MM-DD local
+  received: number
+  registered: number
+}
+
+export interface MyConversionSummary {
+  /** Chats assigned to the agent in the range. */
+  received: number
+  /** Leads the agent registered in the range. */
+  registered: number
+  /** Of the chats received, how many the agent registered (whenever). */
+  receivedRegistered: number
+  rate: number
+  /** Average minutes from receiving the chat to the lead reaching the CRM. */
+  avgMinutes: number | null
+  days: MyConversionDay[]
+}
+
+export function summarizeMine(
+  from: string,
+  to: string,
+  userId: string,
+  leads: LeadRow[],
+  extras: ConversionExtras,
+): MyConversionSummary {
+  const mine = leads.filter((l) => l.source === 'manual' && l.created_by_user_id === userId)
+  const base = summarizeConversion(from, to, [], mine, extras)
+  const row = base.agents.find((a) => a.userId === userId)
+
+  const received = new Map<string, Set<string>>()
+  for (const a of extras.assignments ?? []) {
+    if (a.agent_id !== userId) continue
+    const day = localDayKey(a.assigned_at)
+    if (day < from || day > to) continue
+    if (!received.has(day)) received.set(day, new Set())
+    received.get(day)!.add(a.conversation_id)
+  }
+  const registered = new Map<string, Set<string>>()
+  mine.forEach((l, i) => {
+    const day = localDayKey(l.created_at)
+    if (!registered.has(day)) registered.set(day, new Set())
+    registered.get(day)!.add(l.conversation_id ?? `lead-${i}`)
+  })
+
+  return {
+    received: row?.received ?? 0,
+    registered: row?.registered ?? 0,
+    receivedRegistered: row?.receivedRegistered ?? 0,
+    rate: row?.rate ?? 0,
+    avgMinutes: row?.avgMinutes ?? null,
+    days: dayKeysBetween(from, to).map((day) => ({
+      day,
+      received: received.get(day)?.size ?? 0,
+      registered: registered.get(day)?.size ?? 0,
+    })),
+  }
+}
+
+/** Load the signed-in agent's own numbers for `from`..`to` (local days). */
+export async function loadMyConversion(
+  db: SupabaseClient,
+  userId: string,
+  from: string,
+  to: string,
+): Promise<MyConversionSummary> {
+  const start = new Date(`${from}T00:00:00`)
+  const end = new Date(`${to}T00:00:00`)
+  end.setDate(end.getDate() + 1)
+
+  const leads = await fetchAll<LeadRow>((a, b) =>
+    db
+      .from('lead_intakes')
+      .select('conversation_id, source, created_at, created_by_user_id, delivered_at')
+      .eq('source', 'manual')
+      .eq('created_by_user_id', userId)
+      .in('status', REGISTERED_STATUSES)
+      .gte('created_at', start.toISOString())
+      .lt('created_at', end.toISOString())
+      .order('created_at', { ascending: true })
+      .range(a, b),
+  )
+  const assignments = await loadAssignments(db, start, end, leads, userId)
+  const [firstHumanMessageAt, cohortLeads] = await Promise.all([
+    loadFirstHumanMessages(db, leads),
+    loadCohortLeads(db, assignments, start, end, userId),
+  ])
+
+  return summarizeMine(from, to, userId, leads, {
+    aiConversationIds: [],
+    firstHumanMessageAt,
+    names: {},
+    assignments,
+    cohortLeads,
+  })
 }

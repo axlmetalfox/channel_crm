@@ -115,6 +115,12 @@
       "agentsHint": "Received: conversations assigned to them in the range. Effectiveness: of those, how many they registered as a lead. Average time: from receiving the chat until the lead reaches the CRM.",
       "agentReceived": "Received",
       "agentRate": "Effectiveness",
+      "mineReceived": "Conversations received",
+      "mineReceivedHint": "Assigned to you in the range",
+      "mineRegistered": "Leads registered",
+      "mineRegisteredHint": "The ones you sent to Zoho",
+      "mineRate": "Your effectiveness",
+      "mineAvgHint": "From receiving the chat until it reaches Zoho",
       "error": "Could not load the conversion."
     },
     "quickActions": {
@@ -1554,6 +1560,16 @@
       "offHint": "Off: the form fields are free and the agent can type what they need. Name, surname, WhatsApp, email and city are still required.",
       "savedOn": "Validation turned on",
       "savedOff": "Validation turned off",
+      "saveFailed": "Could not save the change"
+    },
+    "myAvailability": {
+      "title": "My availability",
+      "description": "Decide whether the system can assign you conversations automatically.",
+      "toggle": "Available to receive conversations",
+      "onHint": "Available: automatic assignment can give you conversations.",
+      "offHint": "Not available: you will not be assigned new conversations while this is off.",
+      "savedOn": "You are now available",
+      "savedOff": "You are now unavailable",
       "saveFailed": "Could not save the change"
     },
     "recovery": {

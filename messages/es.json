@@ -115,6 +115,12 @@
       "agentsHint": "Recibidas: conversaciones que se le asignaron en el rango. Efectividad: de esas, cuántas registró como lead. Tiempo promedio: desde que recibió el chat hasta que el lead llega al CRM.",
       "agentReceived": "Recibidas",
       "agentRate": "Efectividad",
+      "mineReceived": "Conversaciones recibidas",
+      "mineReceivedHint": "Asignadas a ti en el rango",
+      "mineRegistered": "Leads registrados",
+      "mineRegisteredHint": "Los que enviaste a Zoho",
+      "mineRate": "Tu efectividad",
+      "mineAvgHint": "Desde que recibes el chat hasta que llega a Zoho",
       "error": "No se pudo cargar la conversión."
     },
     "quickActions": {
@@ -1554,6 +1560,16 @@
       "offHint": "Desactivado: los campos del formulario quedan libres y el asesor puede escribir lo que requiera. Siguen siendo obligatorios nombre, apellido, WhatsApp, correo y ciudad.",
       "savedOn": "Validación activada",
       "savedOff": "Validación desactivada",
+      "saveFailed": "No se pudo guardar el cambio"
+    },
+    "myAvailability": {
+      "title": "Mi disponibilidad",
+      "description": "Decide si el sistema puede asignarte conversaciones automáticamente.",
+      "toggle": "Disponible para recibir conversaciones",
+      "onHint": "Disponible: la asignación automática te puede asignar conversaciones.",
+      "offHint": "No disponible: no se te asignarán conversaciones nuevas mientras esté apagado.",
+      "savedOn": "Ahora estás disponible",
+      "savedOff": "Ahora no estás disponible",
       "saveFailed": "No se pudo guardar el cambio"
     },
     "recovery": {

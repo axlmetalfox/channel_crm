@@ -5,7 +5,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { Bot, CheckCheck, MessageSquare, Percent, Target, UserCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { createClient } from '@/lib/supabase/client'
-import { loadConversionSummary, type ConversionSummary } from '@/lib/dashboard/conversion'
+import {
+  loadConversionSummary,
+  loadMyConversion,
+  type ConversionSummary,
+  type MyConversionSummary,
+} from '@/lib/dashboard/conversion'
+import { useAuth } from '@/hooks/use-auth'
+import { canEditSettings, hasMinRole } from '@/lib/auth/roles'
 import { daysAgoStart, localDayKey } from '@/lib/dashboard/date-utils'
 import { cn } from '@/lib/utils'
 import { MetricCard } from './metric-card'
@@ -48,30 +55,47 @@ function formatDuration(minutes: number): string {
 /**
  * Incoming conversations and how many ended in a registered lead (by the AI
  * agent or by a person), for a date range picked with the native calendar.
+ *
+ * Admins and the owner see the whole account. Agents only see their own
+ * numbers (chats assigned to them and leads they sent); viewers see nothing.
  */
 export function ConversionSummaryPanel() {
   const t = useTranslations('Dashboard.conversion')
+  const { user, accountRole, profileLoading } = useAuth()
+  const isAdmin = !!accountRole && canEditSettings(accountRole)
+  const isAgent = !!accountRole && hasMinRole(accountRole, 'agent')
+  const userId = user?.id ?? null
+  const ready = !profileLoading && isAgent && !!userId
+
   const [initialRange] = useState(() => presetRange('7'))
   const [range, setRange] = useState(initialRange)
   const [data, setData] = useState<ConversionSummary | null>(null)
+  const [mine, setMine] = useState<MyConversionSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
 
   // Only fetches; the loading flags are set by whoever changes the range,
   // so no state is set synchronously inside an effect.
-  const fetchRange = useCallback((from: string, to: string) => {
-    loadConversionSummary(createClient(), from, to)
-      .then(setData)
-      .catch((err) => {
-        console.error('[dashboard] conversion failed:', err)
-        setFailed(true)
-      })
-      .finally(() => setLoading(false))
-  }, [])
+  const fetchRange = useCallback(
+    (from: string, to: string) => {
+      const db = createClient()
+      const job: Promise<void> = isAdmin
+        ? loadConversionSummary(db, from, to).then(setData)
+        : loadMyConversion(db, userId as string, from, to).then(setMine)
+      job
+        .catch((err) => {
+          console.error('[dashboard] conversion failed:', err)
+          setFailed(true)
+        })
+        .finally(() => setLoading(false))
+    },
+    [isAdmin, userId],
+  )
 
   useEffect(() => {
+    if (!ready) return
     fetchRange(initialRange.from, initialRange.to)
-  }, [fetchRange, initialRange])
+  }, [ready, fetchRange, initialRange])
 
   const select = (next: { from: string; to: string }) => {
     setRange(next)
@@ -93,6 +117,9 @@ export function ConversionSummaryPanel() {
 
   const percent = (rate: number) => `${formatNumber(rate * 100, 1)}%`
   const today = localDayKey(new Date())
+
+  // Viewers have no numbers of their own; nothing to show until the role is known.
+  if (profileLoading || !isAgent) return null
 
   return (
     <section className="rounded-xl border border-border bg-card">
@@ -149,13 +176,68 @@ export function ConversionSummaryPanel() {
       <div className="space-y-4 p-5">
         {failed ? (
           <p className="text-sm text-muted-foreground">{t('error')}</p>
-        ) : loading || !data ? (
+        ) : loading || (isAdmin ? !data : !mine) ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {Array.from({ length: 5 }).map((_, i) => (
               <Skeleton key={i} className="h-[112px] w-full" />
             ))}
           </div>
-        ) : (
+        ) : !isAdmin && mine ? (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                title={t('mineReceived')}
+                value={formatNumber(mine.received)}
+                icon={MessageSquare}
+                subtitle={t('mineReceivedHint')}
+              />
+              <MetricCard
+                title={t('mineRegistered')}
+                value={formatNumber(mine.registered)}
+                icon={CheckCheck}
+                subtitle={t('mineRegisteredHint')}
+              />
+              <MetricCard
+                title={t('mineRate')}
+                value={percent(mine.rate)}
+                icon={Target}
+                subtitle={t('aiEffectivenessHint', {
+                  registered: mine.receivedRegistered,
+                  interviewed: mine.received,
+                })}
+              />
+              <MetricCard
+                title={t('agentAvg')}
+                value={mine.avgMinutes === null ? '—' : formatDuration(mine.avgMinutes)}
+                icon={Percent}
+                subtitle={t('mineAvgHint')}
+              />
+            </div>
+
+            {mine.days.length > 1 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="py-2 pr-4 font-medium">{t('day')}</th>
+                      <th className="py-2 pr-4 text-right font-medium">{t('mineReceived')}</th>
+                      <th className="py-2 text-right font-medium">{t('mineRegistered')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...mine.days].reverse().map((d) => (
+                      <tr key={d.day} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-4 text-foreground">{d.day}</td>
+                        <td className="py-2 pr-4 text-right tabular-nums text-foreground">{d.received}</td>
+                        <td className="py-2 text-right tabular-nums text-foreground">{d.registered}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : isAdmin && data ? (
           <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <MetricCard
@@ -261,7 +343,7 @@ export function ConversionSummaryPanel() {
               </div>
             )}
           </>
-        )}
+        ) : null}
       </div>
     </section>
   )

@@ -58,7 +58,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
 
-    const config = await loadAiConfig(supabase, accountId).catch((err) => {
+    // The agent's settings (prompt, keys) are admin-only in the database; the
+    // server reads them on the agent's behalf.
+    const config = await loadAiConfig(supabaseAdmin(), accountId).catch((err) => {
       // Decrypt failure — surface distinctly from "not configured".
       console.error('[ai/draft] loadAiConfig error:', err)
       throw new AiError('Stored API key could not be decrypted.', {

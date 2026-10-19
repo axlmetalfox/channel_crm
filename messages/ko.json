@@ -115,6 +115,12 @@
       "agentsHint": "배정됨: 기간 내 배정된 대화. 효율: 그중 리드로 등록한 비율. 평균 시간: 채팅을 받은 시점부터 리드가 CRM에 도착할 때까지.",
       "agentReceived": "배정됨",
       "agentRate": "효율",
+      "mineReceived": "받은 대화",
+      "mineReceivedHint": "선택한 기간에 나에게 배정됨",
+      "mineRegistered": "등록한 리드",
+      "mineRegisteredHint": "Zoho로 보낸 리드",
+      "mineRate": "나의 효율",
+      "mineAvgHint": "채팅을 받은 시점부터 Zoho에 도착할 때까지",
       "error": "전환 데이터를 불러올 수 없습니다."
     },
     "quickActions": {
@@ -1554,6 +1560,16 @@
       "offHint": "꺼짐: 양식 필드를 자유롭게 입력할 수 있습니다. 이름, 성, WhatsApp, 이메일, 도시는 계속 필수입니다.",
       "savedOn": "검증이 켜졌습니다",
       "savedOff": "검증이 꺼졌습니다",
+      "saveFailed": "변경 사항을 저장할 수 없습니다"
+    },
+    "myAvailability": {
+      "title": "내 근무 가능 상태",
+      "description": "시스템이 대화를 자동으로 배정할 수 있는지 결정합니다.",
+      "toggle": "대화를 받을 수 있음",
+      "onHint": "가능: 자동 배정으로 대화가 배정될 수 있습니다.",
+      "offHint": "불가: 꺼져 있는 동안 새 대화가 배정되지 않습니다.",
+      "savedOn": "이제 근무 가능 상태입니다",
+      "savedOff": "이제 근무 불가 상태입니다",
       "saveFailed": "변경 사항을 저장할 수 없습니다"
     },
     "recovery": {
