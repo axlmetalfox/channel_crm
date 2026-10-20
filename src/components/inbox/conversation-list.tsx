@@ -9,7 +9,11 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X } from "lucide-react";
+import { Search, ChevronDown, X, ListChecks } from "lucide-react";
+import { toast } from "sonner";
+import { bulkContactTag } from "@/lib/contacts/tag-api";
+import { useCan } from "@/hooks/use-can";
+import { Checkbox } from "@/components/ui/checkbox";
 import { formatDistanceToNow } from "date-fns";
 import { useLocale, useTranslations } from "next-intl";
 import { dateFnsLocale } from "@/lib/date-locale";
@@ -73,6 +77,13 @@ export function ConversationList({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+
+  // Selection mode: tick conversations (or all the filtered ones) and add or
+  // remove a tag on their contacts in one go.
+  const canEditTags = useCan("send-messages");
+  const [selecting, setSelecting] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -204,6 +215,72 @@ export function ConversationList({
 
   const hasContactFilters = selectedTagIds.length > 0 || selectedCompany !== null;
 
+  const allFilteredChecked =
+    filtered.length > 0 && filtered.every((c) => checkedIds.has(c.id));
+  const someFilteredChecked = filtered.some((c) => checkedIds.has(c.id));
+
+  const toggleChecked = useCallback((id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllFiltered = useCallback(() => {
+    setCheckedIds(
+      allFilteredChecked ? new Set() : new Set(filtered.map((c) => c.id))
+    );
+  }, [allFilteredChecked, filtered]);
+
+  const exitSelecting = useCallback(() => {
+    setSelecting(false);
+    setCheckedIds(new Set());
+  }, []);
+
+  const handleBulkTag = useCallback(
+    async (tagId: string, action: "add" | "remove") => {
+      const tag = tagsById.get(tagId);
+      const chosen = conversations.filter((c) => checkedIds.has(c.id) && c.contact);
+      const contactIds = [...new Set(chosen.map((c) => c.contact!.id))];
+      if (contactIds.length === 0 || !tag) return;
+      setBulkBusy(true);
+      try {
+        for (let i = 0; i < contactIds.length; i += 500) {
+          await bulkContactTag(contactIds.slice(i, i + 500), tagId, action);
+        }
+        // Mirror the change on the loaded conversations so the filter and
+        // the contact panel agree without a refetch.
+        const touched = new Set(contactIds);
+        onConversationsLoaded(
+          conversations.map((c) => {
+            if (!c.contact || !touched.has(c.contact.id)) return c;
+            const current = c.contact.tags ?? [];
+            const without = current.filter((x) => x.id !== tagId);
+            return {
+              ...c,
+              contact: {
+                ...c.contact,
+                tags: action === "add" ? [...without, tag] : without,
+              },
+            };
+          })
+        );
+        toast.success(
+          action === "add"
+            ? t("bulkTagAdded", { tag: tag.name, count: contactIds.length })
+            : t("bulkTagRemoved", { tag: tag.name, count: contactIds.length })
+        );
+        exitSelecting();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t("bulkTagFailed"));
+      }
+      setBulkBusy(false);
+    },
+    [checkedIds, conversations, exitSelecting, onConversationsLoaded, t, tagsById]
+  );
+
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       setSearch(e.target.value);
@@ -306,6 +383,22 @@ export function ConversationList({
             </DropdownMenu>
           )}
 
+          {canEditTags && (
+            <button
+              type="button"
+              onClick={() => (selecting ? exitSelecting() : setSelecting(true))}
+              aria-pressed={selecting}
+              title={t("selectMode")}
+              className={cn(
+                "ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs hover:bg-muted",
+                selecting ? "text-primary" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <ListChecks className="h-3.5 w-3.5" />
+              {t("selectMode")}
+            </button>
+          )}
+
           {companies.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -391,6 +484,55 @@ export function ConversationList({
         )}
       </div>
 
+      {selecting && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+            <Checkbox
+              checked={allFilteredChecked}
+              indeterminate={!allFilteredChecked && someFilteredChecked}
+              onCheckedChange={toggleAllFiltered}
+              disabled={filtered.length === 0}
+              aria-label={t("selectAllFiltered", { count: filtered.length })}
+            />
+            {checkedIds.size > 0
+              ? t("selectedCount", { count: checkedIds.size })
+              : t("selectAllFiltered", { count: filtered.length })}
+          </label>
+          {([
+            ["add", t("addTag")],
+            ["remove", t("removeTag")],
+          ] as const).map(([action, label]) => (
+            <DropdownMenu key={action}>
+              <DropdownMenuTrigger
+                disabled={bulkBusy || checkedIds.size === 0 || tags.length === 0}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {label}
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-64 w-56 border-border bg-popover"
+              >
+                {tags.map((tg) => (
+                  <DropdownMenuItem
+                    key={tg.id}
+                    onClick={() => handleBulkTag(tg.id, action)}
+                    className="text-sm text-popover-foreground"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: tg.color }}
+                    />
+                    <span className="truncate">{tg.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ))}
+        </div>
+      )}
+
       {/* Conversation Items.
           `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
@@ -414,6 +556,9 @@ export function ConversationList({
                 conversation={conv}
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
+                selecting={selecting}
+                checked={checkedIds.has(conv.id)}
+                onToggleChecked={toggleChecked}
                 t={t}
               />
             ))}
@@ -428,6 +573,9 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  selecting: boolean;
+  checked: boolean;
+  onToggleChecked: (id: string) => void;
   t: ReturnType<typeof useTranslations>;
 }
 
@@ -435,6 +583,9 @@ function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  selecting,
+  checked,
+  onToggleChecked,
   t,
 }: ConversationItemProps) {
   const locale = useLocale();
@@ -443,8 +594,9 @@ function ConversationItem({
   const initials = displayName.charAt(0).toUpperCase();
 
   const handleClick = useCallback(() => {
-    onSelect(conversation);
-  }, [onSelect, conversation]);
+    if (selecting) onToggleChecked(conversation.id);
+    else onSelect(conversation);
+  }, [selecting, onToggleChecked, onSelect, conversation]);
 
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
@@ -454,10 +606,20 @@ function ConversationItem({
     : "";
 
   return (
+    <div className="flex items-stretch">
+    {selecting && (
+      <div className="flex items-center pl-3">
+        <Checkbox
+          checked={checked}
+          onCheckedChange={() => onToggleChecked(conversation.id)}
+          aria-label={displayName}
+        />
+      </div>
+    )}
     <button
       onClick={handleClick}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
+        "flex min-w-0 flex-1 items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
         isActive && "border-l-2 border-primary bg-muted/70"
       )}
     >
@@ -503,5 +665,6 @@ function ConversationItem({
         </div>
       </div>
     </button>
+    </div>
   );
 }
