@@ -9,11 +9,30 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, ListChecks } from "lucide-react";
+import { Search, ChevronDown, X, ListChecks, LayoutTemplate, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { bulkContactTag } from "@/lib/contacts/tag-api";
 import { useCan } from "@/hooks/use-can";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { TemplatePicker, type TemplateSendValues } from "./template-picker";
+import { renderTemplateBody } from "@/lib/whatsapp/template-body";
+import {
+  BULK_SEND_GAP_MS,
+  BULK_TEMPLATE_MAX,
+  recipientName,
+  runBulkTemplate,
+  type BulkItem,
+} from "@/lib/inbox/bulk-template";
+import type { MessageTemplate } from "@/types";
 import { formatDistanceToNow } from "date-fns";
 import { useLocale, useTranslations } from "next-intl";
 import { dateFnsLocale } from "@/lib/date-locale";
@@ -85,6 +104,16 @@ export function ConversationList({
   const [selecting, setSelecting] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // One approved template to every ticked conversation (re-engage quiet
+  // customers): pick it, confirm the count, then it sends one by one.
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [bulkPlan, setBulkPlan] = useState<{
+    template: MessageTemplate;
+    values: TemplateSendValues;
+    items: BulkItem[];
+  } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const bulkStop = useRef(false);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -245,6 +274,68 @@ export function ConversationList({
     setSelecting(false);
     setCheckedIds(new Set());
   }, []);
+
+  const handleTemplatePicked = useCallback(
+    (template: MessageTemplate, values: TemplateSendValues) => {
+      const items: BulkItem[] = conversations
+        .filter((c) => checkedIds.has(c.id) && c.contact && !c.contact.blocked_at)
+        .map((c) => ({ conversationId: c.id, name: recipientName(c.contact) }));
+      if (items.length === 0) return;
+      if (items.length > BULK_TEMPLATE_MAX) {
+        toast.error(t("bulkTemplateTooMany", { max: BULK_TEMPLATE_MAX }));
+        return;
+      }
+      setBulkPlan({ template, values, items });
+    },
+    [checkedIds, conversations, t]
+  );
+
+  const sendBulkTemplate = useCallback(async () => {
+    if (!bulkPlan) return;
+    const { template, values, items } = bulkPlan;
+    bulkStop.current = false;
+    setBulkProgress({ done: 0, total: items.length });
+    const outcome = await runBulkTemplate({
+      items,
+      shouldStop: () => bulkStop.current,
+      onProgress: (done, total) => setBulkProgress({ done, total }),
+      send: async (item) => {
+        // The first body variable is the customer's name; the rest are the
+        // same for everyone.
+        const body = values.body.length > 0 ? values.body.map((v, i) => (i === 0 ? item.name : v)) : [];
+        try {
+          const res = await fetch("/api/whatsapp/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: item.conversationId,
+              message_type: "template",
+              template_name: template.name,
+              template_language: template.language,
+              template_message_params: {
+                body,
+                headerText: values.headerText,
+                buttonParams: values.buttonParams,
+              },
+              template_params: body,
+              content_text: renderTemplateBody(template.body_text, body),
+            }),
+          });
+          if (res.ok) return { ok: true };
+          const payload = await res.json().catch(() => ({}));
+          return { ok: false, error: payload?.error || `HTTP ${res.status}` };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : "error" };
+        }
+      },
+    });
+    setBulkProgress(null);
+    setBulkPlan(null);
+    const summary = t("bulkTemplateDone", { sent: outcome.sent, failed: outcome.failed.length });
+    if (outcome.failed.length > 0 || outcome.stopped) toast.warning(outcome.stopped ? `${summary} ${t("bulkTemplateStopped")}` : summary);
+    else toast.success(summary);
+    exitSelecting();
+  }, [bulkPlan, exitSelecting, t]);
 
   const handleBulkTag = useCallback(
     async (tagId: string, action: "add" | "remove") => {
@@ -505,6 +596,15 @@ export function ConversationList({
               ? t("selectedCount", { count: checkedIds.size })
               : t("selectAllFiltered", { count: filtered.length })}
           </label>
+          <button
+            type="button"
+            disabled={bulkBusy || checkedIds.size === 0}
+            onClick={() => setTemplatePickerOpen(true)}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <LayoutTemplate className="h-3 w-3" />
+            {t("sendTemplate")}
+          </button>
           {([
             ["add", t("addTag")],
             ["remove", t("removeTag")],
@@ -539,6 +639,67 @@ export function ConversationList({
           ))}
         </div>
       )}
+
+      <TemplatePicker
+        bulk
+        open={templatePickerOpen}
+        onOpenChange={setTemplatePickerOpen}
+        onSelect={handleTemplatePicked}
+      />
+
+      <Dialog
+        open={!!bulkPlan}
+        onOpenChange={(open) => {
+          if (!open && !bulkProgress) setBulkPlan(null);
+        }}
+      >
+        <DialogContent className="border-border bg-popover sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-popover-foreground">
+              <LayoutTemplate className="h-4 w-4 text-primary" />
+              {t("bulkTemplateTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              {bulkPlan &&
+                t("bulkTemplateConfirm", {
+                  name: bulkPlan.template.name,
+                  count: bulkPlan.items.length,
+                  minutes: Math.max(1, Math.ceil((bulkPlan.items.length * BULK_SEND_GAP_MS) / 60000)),
+                })}
+            </DialogDescription>
+          </DialogHeader>
+          {bulkProgress && (
+            <div className="space-y-2">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round((bulkProgress.done / Math.max(1, bulkProgress.total)) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t("bulkTemplateProgress", { done: bulkProgress.done, total: bulkProgress.total })}
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            {bulkProgress ? (
+              <Button variant="outline" onClick={() => (bulkStop.current = true)}>
+                {t("bulkTemplateStop")}
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setBulkPlan(null)}>
+                  {t("bulkTemplateCancel")}
+                </Button>
+                <Button onClick={sendBulkTemplate}>
+                  {bulkProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <LayoutTemplate className="h-4 w-4" />}
+                  {t("bulkTemplateSend")}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Conversation Items.
           `min-h-0` is load-bearing: a flex child defaults to

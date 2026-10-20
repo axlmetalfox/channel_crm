@@ -34,6 +34,12 @@ interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
+  /**
+   * Picking a template for many conversations at once: the first body
+   * variable is each customer's name, filled in per recipient, so it is not
+   * asked for here (the other values are the same for everyone).
+   */
+  bulk?: boolean;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -78,6 +84,7 @@ export function TemplatePicker({
   open,
   onOpenChange,
   onSelect,
+  bulk = false,
 }: TemplatePickerProps) {
   const t = useTranslations("Inbox.templatePicker");
 
@@ -181,7 +188,7 @@ export function TemplatePicker({
   const canConfirm =
     !!selected &&
     !!slots &&
-    slots.bodyVars.every((_, i) => (params[i] ?? "").trim().length > 0) &&
+    slots.bodyVars.every((_, i) => (bulk && i === 0) || (params[i] ?? "").trim().length > 0) &&
     (slots.headerVarCount === 0 || headerText.trim().length > 0) &&
     slots.urlButtonSlots.every(
       (s) => (buttonParams[s.index] ?? "").trim().length > 0,
@@ -253,7 +260,10 @@ export function TemplatePicker({
             <div className="rounded-md border border-border bg-background/50 p-3">
               <p className="mb-1 text-xs text-muted-foreground">{t("preview")}</p>
               <p className="whitespace-pre-wrap text-sm text-popover-foreground">
-                {renderBodyPreview(selected.body_text, params)}
+                {renderBodyPreview(
+                  selected.body_text,
+                  bulk && params.length > 0 ? [t("bulkNameSample"), ...params.slice(1)] : params,
+                )}
               </p>
               {selected.footer_text && (
                 <p className="mt-2 text-xs italic text-muted-foreground">
@@ -274,7 +284,12 @@ export function TemplatePicker({
                 />
               </div>
             )}
-            {slots?.bodyVars.map((v, i) => (
+            {bulk && slots && slots.bodyVars.length > 0 && (
+              <p className="rounded-md border border-border bg-background/50 p-2 text-xs text-muted-foreground">
+                {t("bulkNameNote", { val: `{{${slots.bodyVars[0]}}}` })}
+              </p>
+            )}
+            {slots?.bodyVars.map((v, i) => (bulk && i === 0 ? null : (
               <div key={v} className="space-y-1">
                 <Label className="text-xs text-popover-foreground">{`Body {{${v}}}`}</Label>
                 <Input
@@ -288,7 +303,7 @@ export function TemplatePicker({
                   className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
                 />
               </div>
-            ))}
+            )))}
             {slots?.urlButtonSlots.map((slot) => (
               <div key={slot.index} className="space-y-1">
                 <Label className="text-xs text-popover-foreground">
