@@ -49,7 +49,10 @@ import {
   SlidersHorizontal,
   Filter,
   X,
+  Tag as TagIcon,
+  TagsIcon,
 } from 'lucide-react';
+import { bulkContactTag } from '@/lib/contacts/tag-api';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
@@ -93,6 +96,7 @@ export default function ContactsPage() {
   // Bulk selection (page-scoped — only the loaded rows are selectable)
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkTagging, setBulkTagging] = useState(false);
 
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
@@ -314,6 +318,25 @@ export default function ContactsPage() {
     setBulkDeleteOpen(false);
   }
 
+  async function handleBulkTag(tagId: string, action: 'add' | 'remove') {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const tag = tagsMap[tagId];
+    setBulkTagging(true);
+    try {
+      const result = await bulkContactTag(ids, tagId, action);
+      toast.success(
+        action === 'add'
+          ? t('toastBulkTagAdded', { tag: tag?.name ?? '', count: result.added })
+          : t('toastBulkTagRemoved', { tag: tag?.name ?? '', count: result.removed })
+      );
+      fetchContacts();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('toastBulkTagFailed'));
+    }
+    setBulkTagging(false);
+  }
+
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const hasNext = page < totalPages - 1;
   const hasPrev = page > 0;
@@ -513,6 +536,39 @@ export default function ContactsPage() {
             >
               {t('clearSelection')}
             </Button>
+            {([
+              ['add', TagIcon, t('addTagSelected')],
+              ['remove', TagsIcon, t('removeTagSelected')],
+            ] as const).map(([action, Icon, label]) => (
+              <DropdownMenu key={action}>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!canEdit || bulkTagging || allTags.length === 0}
+                    />
+                  }
+                >
+                  <Icon className="size-4" />
+                  {label}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+                  {allTags.map((tag) => (
+                    <DropdownMenuItem
+                      key={tag.id}
+                      onClick={() => handleBulkTag(tag.id, action)}
+                    >
+                      <span
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: tag.color }}
+                      />
+                      {tag.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ))}
             <GatedButton
               variant="destructive"
               size="sm"

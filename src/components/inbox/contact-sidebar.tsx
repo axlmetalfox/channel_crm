@@ -4,6 +4,7 @@ import { formatNumber } from '@/lib/currency'
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { useCan } from "@/hooks/use-can";
 import { cn } from "@/lib/utils";
 import type { Contact, ConversationAttribution, Deal, ContactNote, Tag } from "@/types";
 import {
@@ -17,7 +18,11 @@ import {
   StickyNote,
   Plus,
   Megaphone,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
+import { addContactTag, deleteContactTag } from "@/lib/contacts/tag-api";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -34,10 +39,14 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
   const tThread = useTranslations("Inbox.messageThread");
 
   const { accountId } = useAuth();
+  // Viewers (read-only role) see the tags but cannot change them.
+  const canEditTags = useCan("send-messages");
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagBusy, setTagBusy] = useState(false);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -47,7 +56,7 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
     const supabase = createClient();
 
     // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, allTagsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -62,8 +71,10 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      supabase.from("tags").select("*").order("name"),
     ]);
 
+    if (allTagsRes.data) setAllTags(allTagsRes.data as Tag[]);
     if (dealsRes.data) setDeals(dealsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
     if (tagsRes.data) {
@@ -93,6 +104,42 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
     // React Compiler's inference agrees with the manual dep list —
     // fixes the `preserve-manual-memoization` lint error.
   }, [contact]);
+
+  // Tags are saved through the API (same path as the contact screen), then the
+  // chip list is refreshed from the database so it never drifts.
+  const handleRemoveTag = useCallback(
+    async (tagId: string) => {
+      if (!contact) return;
+      setTagBusy(true);
+      try {
+        await deleteContactTag(contact.id, tagId);
+        setTags((prev) => prev.filter((tag) => tag.id !== tagId));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tSidebar("tagError"));
+      }
+      setTagBusy(false);
+    },
+    [contact, tSidebar]
+  );
+
+  const handleAddTag = useCallback(
+    async (tagId: string) => {
+      if (!contact) return;
+      setTagBusy(true);
+      try {
+        await addContactTag(contact.id, tagId);
+        await fetchContactData();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tSidebar("tagError"));
+      }
+      setTagBusy(false);
+    },
+    [contact, fetchContactData, tSidebar]
+  );
+
+  const availableTags = allTags.filter(
+    (tag) => !tags.some((current) => current.id === tag.id)
+  );
 
   const handleAddNote = useCallback(async () => {
     if (!contact || !newNote.trim()) return;
@@ -228,22 +275,68 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
               <TagIcon className="h-3 w-3" />
               {tSidebar("tags")}
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {tags.length === 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              {tags.length === 0 && (
                 <p className="px-1 text-xs text-muted-foreground">{tSidebar("noTags")}</p>
-              ) : (
-                tags.map((tag) => (
-                  <span
-                    key={tag.contact_tag_id}
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: `${tag.color}20`,
-                      color: tag.color,
-                    }}
+              )}
+              {tags.map((tag) => (
+                <span
+                  key={tag.contact_tag_id}
+                  className="inline-flex items-center gap-0.5 rounded-full py-0.5 pl-2 pr-1 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: `${tag.color}20`,
+                    color: tag.color,
+                  }}
+                >
+                  {tag.name}
+                  {canEditTags && (
+                    <button
+                      type="button"
+                      disabled={tagBusy}
+                      onClick={() => handleRemoveTag(tag.id)}
+                      aria-label={tSidebar("removeTag", { tag: tag.name })}
+                      title={tSidebar("removeTag", { tag: tag.name })}
+                      className="rounded-full p-0.5 hover:bg-black/10 disabled:opacity-50"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {canEditTags && availableTags.length > 0 && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        disabled={tagBusy}
+                        aria-label={tSidebar("addTag")}
+                        title={tSidebar("addTag")}
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      />
+                    }
                   >
-                    {tag.name}
-                  </span>
-                ))
+                    <Plus className="h-3 w-3" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-48 p-1">
+                    <div className="max-h-56 overflow-y-auto">
+                      {availableTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => handleAddTag(tag.id)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        >
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          <span className="truncate">{tag.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
           </div>
