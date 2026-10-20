@@ -11,6 +11,7 @@ import {
   LayoutTemplate,
   CornerDownLeft,
   Sparkles,
+  ShieldAlert,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -38,6 +39,42 @@ interface MessageBubbleProps {
    * stays inline and non-clickable.
    */
   onOpenMedia?: (messageId: string) => void;
+  /** Hide a customer's photo or video behind a blur until clicked. */
+  blurred?: boolean;
+  onReveal?: (messageId: string) => void;
+}
+
+/** Blurs its children and puts a "show" button on top while `blurred`. */
+function BlurGuard({
+  blurred,
+  flagged,
+  onReveal,
+  t,
+  children,
+}: {
+  blurred: boolean;
+  flagged: boolean;
+  onReveal?: () => void;
+  t: ReturnType<typeof useTranslations>;
+  children: React.ReactNode;
+}) {
+  if (!blurred) return <>{children}</>;
+  return (
+    <div className="relative overflow-hidden rounded-lg">
+      <div aria-hidden className="pointer-events-none select-none blur-2xl">
+        {children}
+      </div>
+      <button
+        type="button"
+        onClick={onReveal}
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-background/40 px-3 text-center text-xs font-medium text-foreground"
+      >
+        {flagged && <ShieldAlert className="h-5 w-5 text-destructive" />}
+        <span>{flagged ? t("flaggedMedia") : t("blurredMedia")}</span>
+        <span className="rounded-md bg-background/80 px-2 py-0.5 text-[11px] underline">{t("showMedia")}</span>
+      </button>
+    </div>
+  );
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
@@ -62,13 +99,19 @@ function MessageContent({
   t,
   isAgent,
   onOpenMedia,
+  blurred = false,
+  onReveal,
 }: {
   message: Message;
   t: ReturnType<typeof useTranslations>;
   /** Outbound bubbles sit on the primary fill — badges must invert. */
   isAgent: boolean;
   onOpenMedia?: (messageId: string) => void;
+  blurred?: boolean;
+  onReveal?: (messageId: string) => void;
 }) {
+  const flagged = message.ai_flag === "offensive";
+  const reveal = onReveal ? () => onReveal(message.id) : undefined;
   // Passed to the media bubbles as a no-arg callback; `undefined` when the
   // parent wired up no viewer, which is what makes them non-clickable.
   const openMedia = onOpenMedia ? () => onOpenMedia(message.id) : undefined;
@@ -84,12 +127,14 @@ function MessageContent({
     case "image":
       return (
         <div>
-          {message.media_url ? (
-            <MediaImageBubble message={message} onOpen={openMedia} t={t} />
-          ) : (
-            <MediaUnavailable label={t("photo")} t={t} />
-          )}
-          {message.content_text && (
+          <BlurGuard blurred={blurred} flagged={flagged} onReveal={reveal} t={t}>
+            {message.media_url ? (
+              <MediaImageBubble message={message} onOpen={blurred ? undefined : openMedia} t={t} />
+            ) : (
+              <MediaUnavailable label={t("photo")} t={t} />
+            )}
+          </BlurGuard>
+          {message.content_text && !(blurred && flagged) && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {message.content_text}
             </p>
@@ -105,12 +150,14 @@ function MessageContent({
     case "video":
       return (
         <div>
-          {message.media_url ? (
-            <MediaVideoBubble message={message} onOpen={openMedia} t={t} />
-          ) : (
-            <MediaUnavailable label={t("video")} t={t} />
-          )}
-          {message.content_text && (
+          <BlurGuard blurred={blurred} flagged={flagged} onReveal={reveal} t={t}>
+            {message.media_url ? (
+              <MediaVideoBubble message={message} onOpen={blurred ? undefined : openMedia} t={t} />
+            ) : (
+              <MediaUnavailable label={t("video")} t={t} />
+            )}
+          </BlurGuard>
+          {message.content_text && !(blurred && flagged) && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {message.content_text}
             </p>
@@ -237,6 +284,8 @@ export function MessageBubble({
   currentUserId,
   onToggleReaction,
   onOpenMedia,
+  blurred,
+  onReveal,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
 
@@ -272,6 +321,8 @@ export function MessageBubble({
           t={t}
           isAgent={isAgent}
           onOpenMedia={onOpenMedia}
+          blurred={blurred}
+          onReveal={onReveal}
         />
         <div
           className={cn(

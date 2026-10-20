@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { describeMedia, mediaKindFor, visionModel, IMAGE_MAX_BYTES } from './vision'
+import { describeMedia, mediaKindFor, visionModel, IMAGE_MAX_BYTES, OFFENSIVE } from './vision'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -58,6 +58,34 @@ describe('describeMedia', () => {
     await describeMedia({ ...base, mimeType: 'video/mp4', data: new Uint8Array([1]) })
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(body.messages[0].content[0].text).toContain('este video')
+  })
+
+  it('flags a file the model calls offensive, with no description', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: OFFENSIVE } }] }), { status: 200 })),
+    )
+    expect(await describeMedia({ ...base, data: new Uint8Array([1]) })).toMatchObject({ text: null, flagged: true })
+  })
+
+  it('treats a safety-filter refusal as flagged too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ choices: [{ message: { content: '' }, finish_reason: 'content_filter' }] }), { status: 200 }),
+      ),
+    )
+    expect((await describeMedia({ ...base, data: new Uint8Array([1]) })).flagged).toBe(true)
+  })
+
+  it('asks the model to mark explicit or offensive files', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await describeMedia({ ...base, data: new Uint8Array([1]) })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.messages[0].content[0].text).toContain(OFFENSIVE)
   })
 
   it('returns null text for an empty answer', async () => {

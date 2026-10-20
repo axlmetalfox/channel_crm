@@ -22,11 +22,15 @@ export type MediaKind = 'image' | 'video'
 export const IMAGE_MAX_BYTES = 5_000_000
 export const VIDEO_MAX_BYTES = 5_000_000
 
+/** Reply the model gives when the file is explicit or offensive. */
+export const OFFENSIVE = '[[OFENSIVO]]'
+
 const BASE_PROMPT =
   'Describe en español, en 2 a 4 frases, lo que muestra {what} enviad{a} por un cliente de una empresa que vende máquinas empacadoras y envasadoras. ' +
   'Enfócate en el producto que quiere empacar, el tipo de empaque o la máquina que se ve. ' +
   'Si hay texto legible (etiquetas, medidas, marcas, cantidades), inclúyelo tal cual. ' +
-  'Describe solo lo que se ve; no inventes ni supongas nada. Responde solo con la descripción.'
+  'Describe solo lo que se ve; no inventes ni supongas nada. Responde solo con la descripción. ' +
+  `Excepción: si muestra desnudez, contenido sexual, violencia gráfica, símbolos de odio o material claramente ofensivo o de acoso, no lo describas y responde exactamente: ${OFFENSIVE}`
 
 export function describePrompt(kind: MediaKind): string {
   return kind === 'video'
@@ -49,7 +53,7 @@ export function mediaKindFor(mimeType: string | null | undefined): MediaKind | n
 }
 
 interface OpenAiVisionResponse {
-  choices?: { message?: { content?: string } }[]
+  choices?: { message?: { content?: string }; finish_reason?: string }[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -58,14 +62,18 @@ interface OpenAiVisionResponse {
   }
 }
 
-/** Describe one photo or video. `text` is null when the model returned nothing. */
+/**
+ * Describe one photo or video. `text` is null when the model returned
+ * nothing. `flagged` is true when the model judged the file explicit or
+ * offensive (or its safety filter refused it): there is no description then.
+ */
 export async function describeMedia(args: {
   apiKey: string
   model: string
   data: Uint8Array
   mimeType: string
   timeoutMs: number
-}): Promise<{ text: string | null; usage: AiUsage | null }> {
+}): Promise<{ text: string | null; flagged: boolean; usage: AiUsage | null }> {
   const kind = mediaKindFor(args.mimeType)
   if (!kind) {
     throw new AiError('That media format cannot be described.', { code: 'unsupported_media' })
@@ -113,5 +121,7 @@ export async function describeMedia(args: {
     credits: data?.usage?.credits_charged,
   })
   const text = typeof raw === 'string' ? raw.trim() : ''
-  return { text: text || null, usage }
+  const refused = data?.choices?.[0]?.finish_reason === 'content_filter'
+  if (refused || text.includes(OFFENSIVE)) return { text: null, flagged: true, usage }
+  return { text: text || null, flagged: false, usage }
 }

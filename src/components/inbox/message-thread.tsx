@@ -27,7 +27,7 @@ import {
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
-  PanelRightClose, ClipboardCheck } from "lucide-react";
+  PanelRightClose, ClipboardCheck, Ban, ShieldAlert, ShieldCheck } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,10 @@ import { TemplatePicker } from "./template-picker";
 import { SendToZohoDialog } from "./send-to-zoho-dialog";
 import { useCan } from "@/hooks/use-can";
 import { AiThreadBanner } from "./ai-thread-banner";
+import { BlockContactDialog, whatsappOutcomeKey } from "./block-contact-dialog";
+import { unblockContact } from "@/lib/contacts/block-api";
+import type { BlockReason } from "@/lib/contacts/block-reasons";
+import { hasHumanReply, isMediaBlurred } from "@/lib/inbox/media-blur";
 import { buildReplyPreview } from "./reply-quote";
 import { renderTemplateBody } from "@/lib/whatsapp/template-body";
 import { toast } from "sonner";
@@ -172,6 +176,7 @@ export function MessageThread({
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
+  const tBlock = useTranslations("Inbox.block");
 
   const { user, accountRole } = useAuth();
   const { getPresence, getRow, now } = usePresence();
@@ -180,6 +185,21 @@ export function MessageThread({
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [zohoOpen, setZohoOpen] = useState(false);
   const canSendToCrm = useCan("send-messages");
+  // Blocking abusive or fake contacts: anyone who answers chats can block;
+  // lifting the block is for admins and the owner.
+  const canBlock = useCan("send-messages");
+  const canUnblock = !!accountRole && hasMinRole(accountRole, "admin");
+  const [blockOpen, setBlockOpen] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+  // The contact prop comes from the conversation list, which is only
+  // refetched on resync: keep the block state we just changed here.
+  const [blockOverride, setBlockOverride] = useState<{
+    contactId: string;
+    blockedAt: string | null;
+    reason: BlockReason | null;
+  } | null>(null);
+  // Photos/videos the person chose to look at (kept while the thread is open).
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -752,7 +772,43 @@ export function MessageThread({
 
   // Images + videos in the thread, in order — the set the media viewer
   // pages through with ← / →.
-  const mediaGallery = useMemo(() => collectMediaGallery(messages), [messages]);
+  const humanReplied = useMemo(() => hasHumanReply(messages), [messages]);
+  const blurredIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of messages) {
+      if (isMediaBlurred(m, { humanReplied, revealed })) ids.add(m.id);
+    }
+    return ids;
+  }, [messages, humanReplied, revealed]);
+  // Blurred files stay out of the viewer until they are revealed.
+  const mediaGallery = useMemo(
+    () => collectMediaGallery(messages.filter((m) => !blurredIds.has(m.id))),
+    [messages, blurredIds],
+  );
+  const handleReveal = useCallback((messageId: string) => {
+    setRevealed((prev) => new Set(prev).add(messageId));
+  }, []);
+  const hasFlaggedMedia = useMemo(
+    () => messages.some((m) => m.sender_type === "customer" && m.ai_flag === "offensive"),
+    [messages],
+  );
+  const override = blockOverride && contact && blockOverride.contactId === contact.id ? blockOverride : null;
+  const blockedAt = override ? override.blockedAt : (contact?.blocked_at ?? null);
+  const blockReason = override ? override.reason : (contact?.block_reason ?? null);
+
+  const handleUnblock = useCallback(async () => {
+    if (!contact) return;
+    setBlockBusy(true);
+    try {
+      const outcome = await unblockContact(contact.id);
+      setBlockOverride({ contactId: contact.id, blockedAt: null, reason: null });
+      toast.success(`${t("unblocked")} ${tBlock(whatsappOutcomeKey(outcome))}`);
+      onRefresh?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tBlock("error"));
+    }
+    setBlockBusy(false);
+  }, [contact, onRefresh, t, tBlock]);
 
   // Bucket reactions by their target message_id for O(1) per-bubble lookup.
   const reactionsByMessageId = useMemo(() => {
@@ -1019,6 +1075,21 @@ export function MessageThread({
             </button>
           )}
 
+          {/* Block an abusive or fake contact — like the block button of the
+              WhatsApp phone app. Anyone who answers chats can use it. */}
+          {canBlock && !blockedAt && (
+            <button
+              type="button"
+              onClick={() => setBlockOpen(true)}
+              aria-label={t("block")}
+              title={t("blockTitle")}
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{t("block")}</span>
+            </button>
+          )}
+
           {/* Manual refresh — forces a refetch of the messages + the
               conversation list (the parent bumps its resyncToken). Useful
               when realtime missed an event or the agent just wants to be
@@ -1211,6 +1282,8 @@ export function MessageThread({
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
                           onOpenMedia={handleMediaChange}
+                          blurred={blurredIds.has(msg.id)}
+                          onReveal={handleReveal}
                         />
                       </MessageActions>
                     );
@@ -1222,32 +1295,90 @@ export function MessageThread({
         )}
       </div>
 
-      {/* AI auto-reply banner — take over an active bot, or resume it
-          after a handoff. Renders nothing unless the account has
-          auto-reply configured. */}
-      <AiThreadBanner
-        conversationId={conversation.id}
-        disabled={conversation.ai_autoreply_disabled ?? false}
-        handoffSummary={conversation.ai_handoff_summary}
-        assignedAgentId={assignedAgentId}
-        currentUserId={user?.id}
-        onChange={(patch) => {
-          if ("assigned_agent_id" in patch) {
-            onAssignChange(conversation.id, patch.assigned_agent_id ?? null);
-          }
-        }}
-      />
+      {blockedAt ? (
+        /* Blocked: nothing can be sent. Admins and the owner can lift it. */
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-destructive/5 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm text-foreground">
+            <Ban className="h-4 w-4 shrink-0 text-destructive" />
+            <span>
+              {t("blockedBanner")}
+              {blockReason ? ` · ${tBlock(`reason_${blockReason}`)}` : ""}
+            </span>
+          </p>
+          {canUnblock && (
+            <button
+              type="button"
+              onClick={handleUnblock}
+              disabled={blockBusy}
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted disabled:opacity-60"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {t("unblock")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Something the vision model judged explicit or offensive arrived:
+              the photo is blurred and the AI agent stays out until a person
+              decides. */}
+          {hasFlaggedMedia && canBlock && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-destructive/5 px-4 py-2">
+              <p className="flex items-center gap-2 text-sm text-foreground">
+                <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
+                {t("flaggedBanner")}
+              </p>
+              <button
+                type="button"
+                onClick={() => setBlockOpen(true)}
+                className="inline-flex h-8 items-center gap-1 rounded-md bg-destructive px-3 text-xs text-white hover:bg-destructive/90"
+              >
+                <Ban className="h-3.5 w-3.5" />
+                {t("block")}
+              </button>
+            </div>
+          )}
 
-      {/* Composer */}
-      <MessageComposer
-        conversationId={conversation.id}
-        sessionExpired={sessionInfo.expired}
-        onSend={handleSend}
-        onSendMedia={handleSendMedia}
-        onSendInteractive={handleSendInteractive}
-        onOpenTemplates={handleOpenTemplates}
-        replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
+          {/* AI auto-reply banner — take over an active bot, or resume it
+              after a handoff. Renders nothing unless the account has
+              auto-reply configured. */}
+          <AiThreadBanner
+            conversationId={conversation.id}
+            disabled={conversation.ai_autoreply_disabled ?? false}
+            handoffSummary={conversation.ai_handoff_summary}
+            assignedAgentId={assignedAgentId}
+            currentUserId={user?.id}
+            onChange={(patch) => {
+              if ("assigned_agent_id" in patch) {
+                onAssignChange(conversation.id, patch.assigned_agent_id ?? null);
+              }
+            }}
+          />
+
+          {/* Composer */}
+          <MessageComposer
+            conversationId={conversation.id}
+            sessionExpired={sessionInfo.expired}
+            onSend={handleSend}
+            onSendMedia={handleSendMedia}
+            onSendInteractive={handleSendInteractive}
+            onOpenTemplates={handleOpenTemplates}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
+          />
+        </>
+      )}
+
+      <BlockContactDialog
+        open={blockOpen}
+        onOpenChange={setBlockOpen}
+        contactId={contact.id}
+        contactLabel={displayName}
+        defaultReason={hasFlaggedMedia ? "offensive" : "fake"}
+        onBlocked={(reason) => {
+          setBlockOverride({ contactId: contact.id, blockedAt: new Date().toISOString(), reason });
+          onRefresh?.();
+        }}
       />
 
       <SendToZohoDialog

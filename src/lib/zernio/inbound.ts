@@ -208,7 +208,8 @@ async function transcribeVoiceNote(
  * Describe a customer's photo or video with the account's AI key, so the
  * agent can answer it. Returns null when the feature cannot run, the file is
  * too big or cannot be read, or the provider fails: the agent is then told
- * that something arrived but could not be analysed. Records the cost.
+ * that something arrived but could not be analysed. `flagged` is true when
+ * the model judged the file explicit or offensive. Records the cost.
  */
 async function describeCustomerMedia(
   db: SupabaseClient,
@@ -216,19 +217,20 @@ async function describeCustomerMedia(
   conversationId: string,
   url: string,
   mimeType: string | null,
-): Promise<string | null> {
+): Promise<{ description: string | null; flagged: boolean }> {
+  const none = { description: null, flagged: false }
   try {
     const ai = await loadAiConfig(db, accountId)
-    if (!ai || ai.provider !== 'openai') return null
+    if (!ai || ai.provider !== 'openai') return none
     const model = visionModel(ai.model)
-    if (!model) return null
+    if (!model) return none
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
-    if (!res.ok) return null
+    if (!res.ok) return none
     const mime = mimeType ?? res.headers.get('content-type')
     const kind = mediaKindFor(mime)
-    if (!kind) return null
+    if (!kind) return none
     const data = new Uint8Array(await res.arrayBuffer())
-    if (data.byteLength === 0 || data.byteLength > (kind === 'video' ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES)) return null
+    if (data.byteLength === 0 || data.byteLength > (kind === 'video' ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES)) return none
     const out = await describeMedia({
       apiKey: ai.apiKey,
       model,
@@ -244,10 +246,10 @@ async function describeCustomerMedia(
       model,
       usage: out.usage,
     })
-    return out.text
+    return { description: out.text, flagged: out.flagged }
   } catch (err) {
     console.error('[zernio inbound] media description failed:', err)
-    return null
+    return none
   }
 }
 
@@ -318,7 +320,15 @@ export async function processZernioInbound(
   }
   if (!inserted || inserted.length === 0) return // replay
 
+  // A blocked contact: keep the message as evidence and do nothing else (no
+  // unread count, no reopening, no flows, no agent, no notifications).
+  if ((contact as { blocked_at?: string | null }).blocked_at) {
+    console.info('[zernio inbound] message from a blocked contact: stored, not processed')
+    return
+  }
+
   let voiceText: string | null = null
+  let flaggedOffensive = false
 
   // A photo, video, voice note or document: Zernio's link for it needs our API
   // key, so the team's browsers cannot open it. Copy it into our own
@@ -355,11 +365,20 @@ export async function processZernioInbound(
       // A photo or video: put what it shows in words, so the agent can
       // answer it (and the advisor sees what the agent understood).
       if (msg.contentType === 'image' || msg.contentType === 'video') {
-        const description = await describeCustomerMedia(db, config.accountId, conversation.id, mirrored, msg.mimeType)
-        if (description) {
+        const seen = await describeCustomerMedia(db, config.accountId, conversation.id, mirrored, msg.mimeType)
+        if (seen.flagged) {
+          // Explicit or offensive: the inbox blurs it, and the agent stays out
+          // of this conversation until a person decides what to do.
+          flaggedOffensive = true
           await db
             .from('messages')
-            .update({ ai_description: description })
+            .update({ ai_flag: 'offensive' })
+            .eq('id', (inserted[0] as { id: string }).id)
+          await db.from('conversations').update({ ai_autoreply_disabled: true }).eq('id', conversation.id)
+        } else if (seen.description) {
+          await db
+            .from('messages')
+            .update({ ai_description: seen.description })
             .eq('id', (inserted[0] as { id: string }).id)
         }
       }
@@ -434,6 +453,8 @@ export async function processZernioInbound(
     // afterwards, the conversation starts normally.
     if (msg.referral === null && isSocialShareOnly(inboundText) && !(await botHasSpoken(db, conversation.id))) {
       console.info('[zernio inbound] first message is only a shared social link: no reply')
+    } else if (flaggedOffensive) {
+      console.info('[zernio inbound] offensive media flagged: no automatic reply')
     } else if (inboundText.trim() || msg.contentType === 'image' || msg.contentType === 'video') {
       // Text, a transcribed voice note, a photo or a video go to the agent
       // (a photo or video reaches it as a description, or as a note that it

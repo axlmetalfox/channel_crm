@@ -7,6 +7,7 @@ interface DbMessage {
   content_type: string
   content_text: string | null
   ai_description?: string | null
+  ai_flag?: string | null
 }
 
 /** Marks text that came from a voice note, so the agent knows it may contain
@@ -18,6 +19,9 @@ export const AUDIO_TRANSCRIPT_PREFIX = '[Audio transcrito] '
  *  no description could be made, only the fact that it arrived. */
 export function describeMediaForAgent(m: DbMessage): string {
   const noun = m.content_type === 'video' ? 'un video' : 'una imagen'
+  if (m.ai_flag === 'offensive') {
+    return `[El cliente envió ${noun} que parece contener contenido ofensivo; no se muestra.]`
+  }
   const caption = m.content_text?.trim()
   const description = m.ai_description?.trim()
   const parts = [`[El cliente envió ${noun}.`]
@@ -46,7 +50,7 @@ export async function buildConversationContext(
 ): Promise<ChatMessage[]> {
   const { data, error } = await db
     .from('messages')
-    .select('sender_type, content_type, content_text, ai_description')
+    .select('sender_type, content_type, content_text, ai_description, ai_flag')
     .eq('conversation_id', conversationId)
     .in('content_type', ['text', 'audio', 'image', 'video'])
     .order('created_at', { ascending: false })

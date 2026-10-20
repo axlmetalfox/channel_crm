@@ -49,7 +49,7 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
 
 
 
-type InboxFilter = ConversationStatus | "all" | "unread";
+type InboxFilter = ConversationStatus | "all" | "unread" | "blocked";
 
 export function ConversationList({
   activeConversationId,
@@ -66,6 +66,7 @@ export function ConversationList({
     { label: t("filterOpen"), value: "open" },
     { label: t("filterPending"), value: "pending" },
     { label: t("filterClosed"), value: "closed" },
+    { label: t("filterBlocked"), value: "blocked" },
   ], [t]);
 
   const [search, setSearch] = useState("");
@@ -171,9 +172,15 @@ export function ConversationList({
   }, [tags]);
 
   const filtered = useMemo(() => {
-    let result = conversations;
+    // Blocked contacts have their own filter; everywhere else they stay out.
+    let result =
+      filter === "blocked"
+        ? conversations.filter((c) => !!c.contact?.blocked_at)
+        : conversations.filter((c) => !c.contact?.blocked_at);
 
-    if (filter === "unread") {
+    if (filter === "blocked") {
+      // already narrowed above
+    } else if (filter === "unread") {
       result = result.filter((c) => c.unread_count > 0);
     } else if (filter !== "all") {
       result = result.filter((c) => c.status === filter);

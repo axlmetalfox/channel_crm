@@ -108,6 +108,11 @@ export interface Contact {
   email?: string;
   company?: string;
   avatar_url?: string;
+  /** Set when the contact was blocked (migration 066). */
+  blocked_at?: string | null;
+  blocked_by?: string | null;
+  block_reason?: 'offensive' | 'fake' | 'other' | null;
+  block_note?: string | null;
   created_at: string;
   updated_at: string;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
@@ -248,6 +253,8 @@ export interface Message {
   media_type?: string | null;
   /** What the AI saw in a customer's photo or video (migration 065). */
   ai_description?: string | null;
+  /** Set to 'offensive' when the vision model judged a photo or video explicit or offensive (migration 066). */
+  ai_flag?: 'offensive' | null;
   template_name?: string;
   message_id?: string;
   status: MessageStatus;

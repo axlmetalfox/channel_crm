@@ -472,7 +472,7 @@ describe('processZernioInbound', () => {
     afterEach(() => vi.unstubAllGlobals())
 
     it('describes the photo, keeps the description on the message and hands it to the agent', async () => {
-      h.describe.mockResolvedValue({ text: 'Una bolsa de café de 250 g.', usage: null })
+      h.describe.mockResolvedValue({ text: 'Una bolsa de café de 250 g.', flagged: false, usage: null })
       await processZernioInbound(fakeDb(), CONFIG, PHOTO)
       expect(h.describe).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-chat', mimeType: 'image/jpeg' }))
       expect(written('messages', 'update').some((o) => o.values?.ai_description === 'Una bolsa de café de 250 g.')).toBe(true)
@@ -489,8 +489,28 @@ describe('processZernioInbound', () => {
       expect(h.dispatchNonText).not.toHaveBeenCalled()
     })
 
+    it('flags an offensive photo, blurs it for the team and keeps the agent out', async () => {
+      h.describe.mockResolvedValue({ text: null, flagged: true, usage: null })
+      await processZernioInbound(fakeDb(), CONFIG, PHOTO)
+      expect(written('messages', 'update').some((o) => o.values?.ai_flag === 'offensive')).toBe(true)
+      expect(written('conversations', 'update').some((o) => o.values?.ai_autoreply_disabled === true)).toBe(true)
+      expect(h.dispatchAi).not.toHaveBeenCalled()
+      expect(h.dispatchNonText).not.toHaveBeenCalled()
+    })
+
+    it('stores but does not process a message from a blocked contact', async () => {
+      h.findExistingContact.mockResolvedValue({ id: 'ct-1', phone: '573112580000', name: 'Ana', blocked_at: '2026-10-19T00:00:00Z' })
+      await processZernioInbound(fakeDb(), CONFIG, PHOTO)
+      expect(written('messages', 'upsert')).toHaveLength(1)
+      expect(h.describe).not.toHaveBeenCalled()
+      expect(h.dispatchFlows).not.toHaveBeenCalled()
+      expect(h.dispatchAi).not.toHaveBeenCalled()
+      expect(h.dispatchNonText).not.toHaveBeenCalled()
+      expect(h.dispatchWebhook).not.toHaveBeenCalled()
+    })
+
     it('does the same for a video', async () => {
-      h.describe.mockResolvedValue({ text: 'Un bloque de queso envuelto.', usage: null })
+      h.describe.mockResolvedValue({ text: 'Un bloque de queso envuelto.', flagged: false, usage: null })
       await processZernioInbound(fakeDb(), CONFIG, { ...PHOTO, contentType: 'video', mimeType: 'video/mp4' })
       expect(written('messages', 'update').some((o) => o.values?.ai_description === 'Un bloque de queso envuelto.')).toBe(true)
       expect(h.dispatchAi).toHaveBeenCalled()

@@ -44,7 +44,7 @@ export function zernioBaseUrl(): string {
 
 interface RequestOpts {
   apiKey: string
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'DELETE'
   path: string
   body?: unknown
   idempotencyKey?: string
@@ -154,6 +154,43 @@ export async function sendZernioAttachment(args: {
     throw new ZernioError('Zernio accepted the message but returned no id.', 502)
   }
   return { messageId }
+}
+
+export interface WhatsAppBlockResult {
+  /** Users WhatsApp accepted. */
+  done: string[]
+  /** Users it refused, with Meta's reasons (e.g. "Re-engagement required"
+   *  when the person has not written in the last 24 hours). */
+  failed: { input: string; errors: string[] }[]
+}
+
+/**
+ * Block or unblock WhatsApp users on the connected number. Blocked people
+ * cannot message the number and see no online status; sends to them fail.
+ * Meta only blocks people who wrote in the last 24 hours. `users` are
+ * E.164 numbers ("+573001234567") or WhatsApp user ids. The request itself
+ * succeeds even when some users fail: read `failed`.
+ */
+export async function setWhatsAppBlock(args: {
+  apiKey: string
+  accountId: string
+  users: string[]
+  block: boolean
+}): Promise<WhatsAppBlockResult> {
+  const res = await zernioRequest<{
+    blocked?: { input: string }[]
+    unblocked?: { input: string }[]
+    failed?: { input: string; errors?: string[] }[]
+  }>({
+    apiKey: args.apiKey,
+    method: args.block ? 'POST' : 'DELETE',
+    path: '/whatsapp/block-users',
+    body: { accountId: args.accountId, users: args.users },
+  })
+  return {
+    done: (args.block ? res.blocked : res.unblocked)?.map((u) => u.input) ?? [],
+    failed: (res.failed ?? []).map((f) => ({ input: f.input, errors: f.errors ?? [] })),
+  }
 }
 
 /** A WhatsApp message template as Zernio reads it from Meta. */
