@@ -9,7 +9,13 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, ListChecks, LayoutTemplate, Loader2, Layers } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, X, ListChecks, LayoutTemplate, Loader2, Layers } from "lucide-react";
+import {
+  DEFAULT_LIST_STATE,
+  LIST_STATE_STORAGE_KEY,
+  neighbourId,
+  parseSavedListState,
+} from "@/lib/inbox/list-state";
 import { useConversationStages } from "@/hooks/use-conversation-stages";
 import { toast } from "sonner";
 import { bulkContactTag } from "@/lib/contacts/tag-api";
@@ -101,6 +107,46 @@ export function ConversationList({
   // The account's own stages: filter by one, and set one on many chats.
   const { stages, byId: stagesById } = useConversationStages();
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+
+  // The filters and search survive a reload, a deploy or a remount (kept per
+  // browser tab): the person working down the list never has to set them again.
+  const [listStateRestored, setListStateRestored] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = parseSavedListState(window.sessionStorage.getItem(LIST_STATE_STORAGE_KEY));
+      if (saved) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setFilter(saved.filter);
+        setSearch(saved.search);
+        setSelectedTagIds(saved.tagIds);
+        setSelectedCompany(saved.company);
+        setSelectedStageId(saved.stageId);
+      }
+    } catch {
+      // storage unavailable: start from the defaults
+    }
+    setListStateRestored(true);
+  }, []);
+  useEffect(() => {
+    if (!listStateRestored) return;
+    try {
+      window.sessionStorage.setItem(
+        LIST_STATE_STORAGE_KEY,
+        JSON.stringify({
+          ...DEFAULT_LIST_STATE,
+          filter,
+          search,
+          tagIds: selectedTagIds,
+          company: selectedCompany,
+          stageId: selectedStageId,
+        }),
+      );
+    } catch {
+      // storage unavailable: nothing to remember
+    }
+  }, [listStateRestored, filter, search, selectedTagIds, selectedCompany, selectedStageId]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const lastActiveIndex = useRef(0);
 
   // Selection mode: tick conversations (or all the filtered ones) and add or
   // remove a tag on their contacts in one go.
@@ -245,6 +291,46 @@ export function ConversationList({
 
     return result;
   }, [conversations, filter, search, selectedTagIds, selectedCompany, selectedStageId]);
+
+  // Where the open conversation sits in what the person is looking at.
+  const filteredIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
+  const activeIndex = activeConversationId ? filteredIds.indexOf(activeConversationId) : -1;
+  useEffect(() => {
+    if (activeIndex >= 0) lastActiveIndex.current = activeIndex;
+  }, [activeIndex]);
+
+  const goTo = useCallback(
+    (direction: 1 | -1) => {
+      const id = neighbourId(filteredIds, activeConversationId, lastActiveIndex.current, direction);
+      const target = id ? filtered.find((c) => c.id === id) : null;
+      if (target) onSelect(target);
+    },
+    [filteredIds, filtered, activeConversationId, onSelect],
+  );
+
+  // Alt + ↓ / Alt + ↑ move to the next / previous conversation.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      goTo(e.key === "ArrowDown" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [goTo]);
+
+  // Keep the open conversation in view: after a reload, or when moving with
+  // the keys. ("nearest" leaves the list alone when it is already visible.)
+  useEffect(() => {
+    if (!activeConversationId || loading) return;
+    const frame = requestAnimationFrame(() => {
+      listRef.current
+        ?.querySelector(`[data-conv-id="${activeConversationId}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeConversationId, loading]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -651,6 +737,36 @@ export function ConversationList({
         )}
       </div>
 
+      {filtered.length > 0 && (
+        <div className="flex items-center justify-between border-b border-border px-3 py-1 text-[11px] text-muted-foreground">
+          <span title={t("navHint")}>
+            {activeIndex >= 0
+              ? t("position", { current: activeIndex + 1, total: filtered.length })
+              : t("total", { total: filtered.length })}
+          </span>
+          <span className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => goTo(-1)}
+              title={t("previous")}
+              aria-label={t("previous")}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => goTo(1)}
+              title={t("next")}
+              aria-label={t("next")}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-muted hover:text-foreground"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        </div>
+      )}
+
       {selecting && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
           <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
@@ -813,7 +929,7 @@ export function ConversationList({
             <p className="text-sm text-muted-foreground">{t("noConversations")}</p>
           </div>
         ) : (
-          <div className="flex flex-col">
+          <div ref={listRef} className="flex flex-col">
             {filtered.map((conv) => (
               <ConversationItem
                 key={conv.id}
@@ -873,7 +989,7 @@ function ConversationItem({
     : "";
 
   return (
-    <div className="flex items-stretch">
+    <div className="flex items-stretch" data-conv-id={conversation.id}>
     {selecting && (
       <div className="flex items-center pl-3">
         <Checkbox
@@ -887,7 +1003,7 @@ function ConversationItem({
       onClick={handleClick}
       className={cn(
         "flex min-w-0 flex-1 items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
-        isActive && "border-l-2 border-primary bg-muted/70"
+        isActive && "border-l-4 border-primary bg-primary/15"
       )}
     >
       {/* Avatar */}

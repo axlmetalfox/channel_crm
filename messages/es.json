@@ -219,6 +219,11 @@
       "setStage": "Etapa",
       "bulkStageDone": "Etapa actualizada en {count, plural, one {# conversación} other {# conversaciones}}",
       "bulkStageFailed": "No se pudo cambiar la etapa",
+      "position": "Conversación {current} de {total}",
+      "total": "{total} conversaciones",
+      "previous": "Conversación anterior (Alt + ↑)",
+      "next": "Conversación siguiente (Alt + ↓)",
+      "navHint": "Alt + ↓ / Alt + ↑ para pasar a la siguiente o a la anterior",
       "noConversations": "No se encontraron conversaciones",
       "noMessagesYet": "Aún no hay mensajes",
       "unknown": "Desconocido"

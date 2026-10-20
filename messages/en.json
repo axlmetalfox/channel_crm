@@ -219,6 +219,11 @@
       "setStage": "Stage",
       "bulkStageDone": "Stage updated on {count, plural, one {# conversation} other {# conversations}}",
       "bulkStageFailed": "Could not change the stage",
+      "position": "Conversation {current} of {total}",
+      "total": "{total} conversations",
+      "previous": "Previous conversation (Alt + ↑)",
+      "next": "Next conversation (Alt + ↓)",
+      "navHint": "Alt + ↓ / Alt + ↑ to go to the next or previous one",
       "noConversations": "No conversations found",
       "noMessagesYet": "No messages yet",
       "unknown": "Unknown"
