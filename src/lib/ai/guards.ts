@@ -7,7 +7,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // ============================================================
 
 /**
- * True when the customer has written a text message after the given one.
+ * True when the customer has sent something after the given message (text,
+ * a voice note, a photo or a video).
  * The newest message of a burst is the one that gets answered, so the
  * earlier ones step aside.
  */
@@ -28,7 +29,7 @@ export async function hasNewerCustomerText(
     .select('id', { count: 'exact', head: true })
     .eq('conversation_id', conversationId)
     .eq('sender_type', 'customer')
-    .eq('content_type', 'text')
+    .in('content_type', ['text', 'audio', 'image', 'video'])
     .gt('created_at', since)
   return (count ?? 0) > 0
 }

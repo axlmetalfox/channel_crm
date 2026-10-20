@@ -325,6 +325,7 @@
       "quickReplySaveError": "Couldn't save the quick reply."
     },
     "bubble": {
+      "aiDescription": "Automatic description",
       "photo": "Photo",
       "video": "Video",
       "audio": "Audio",

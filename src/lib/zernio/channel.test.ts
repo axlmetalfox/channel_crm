@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   dispatchWebhook: vi.fn(),
   mirror: vi.fn(),
   transcribe: vi.fn(),
+  describe: vi.fn(),
   loadAiConfig: vi.fn(),
   logUsage: vi.fn(),
   state: {
@@ -45,6 +46,11 @@ vi.mock('@/lib/ai/transcribe', () => ({
   AUDIO_MAX_BYTES: 1_000_000,
   transcribeAudio: h.transcribe,
   transcriptionModel: () => process.env.AI_TRANSCRIBE_MODEL?.trim() || null,
+}))
+
+vi.mock('@/lib/ai/vision', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai/vision')>()),
+  describeMedia: h.describe,
 }))
 
 import { sendMediaViaZernio, sendTextViaZernio } from './send'
@@ -397,12 +403,12 @@ describe('processZernioInbound', () => {
     expect(h.dispatchAi).not.toHaveBeenCalled()
   })
 
-  it('does not call the AI for a message without text', async () => {
+  it('does not call the AI for a message that is neither text nor a photo or video', async () => {
     await processZernioInbound(fakeDb(), CONFIG, {
       ...INBOUND,
       text: null,
-      contentType: 'image',
-      mediaUrl: 'https://x/y.png',
+      contentType: 'document',
+      mediaUrl: 'https://x/y.pdf',
     })
     expect(h.dispatchAi).not.toHaveBeenCalled()
     // …but it is not left unanswered: the fixed non-text reply handles it.
@@ -439,6 +445,56 @@ describe('processZernioInbound', () => {
     )
     const updated = written('messages', 'update').find((o) => o.values?.media_url)
     expect(updated?.values?.media_url).toContain('chat-media')
+  })
+
+  describe('photos and videos', () => {
+    const PHOTO = {
+      ...INBOUND,
+      text: null,
+      contentType: 'image' as const,
+      mediaUrl: 'https://zernio.com/api/v1/whatsapp/media/7?accountId=zacc',
+      mimeType: 'image/jpeg',
+    }
+    const bucketUrl = 'https://files.example/chat-media/account-acct-1/inbound/foto.jpg'
+
+    beforeEach(() => {
+      h.mirror.mockResolvedValue(bucketUrl)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+          headers: { get: () => 'image/jpeg' },
+        }),
+      )
+      h.loadAiConfig.mockResolvedValue({ provider: 'openai', apiKey: 'k', model: 'gpt-chat' })
+    })
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('describes the photo, keeps the description on the message and hands it to the agent', async () => {
+      h.describe.mockResolvedValue({ text: 'Una bolsa de café de 250 g.', usage: null })
+      await processZernioInbound(fakeDb(), CONFIG, PHOTO)
+      expect(h.describe).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-chat', mimeType: 'image/jpeg' }))
+      expect(written('messages', 'update').some((o) => o.values?.ai_description === 'Una bolsa de café de 250 g.')).toBe(true)
+      expect(h.dispatchAi).toHaveBeenCalled()
+      expect(h.dispatchNonText).not.toHaveBeenCalled()
+      expect(h.logUsage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mode: 'media_describe' }))
+    })
+
+    it('still goes to the agent when the photo could not be described (it is told something arrived)', async () => {
+      h.describe.mockRejectedValue(new Error('provider down'))
+      await processZernioInbound(fakeDb(), CONFIG, PHOTO)
+      expect(written('messages', 'update').some((o) => o.values?.ai_description)).toBe(false)
+      expect(h.dispatchAi).toHaveBeenCalled()
+      expect(h.dispatchNonText).not.toHaveBeenCalled()
+    })
+
+    it('does the same for a video', async () => {
+      h.describe.mockResolvedValue({ text: 'Un bloque de queso envuelto.', usage: null })
+      await processZernioInbound(fakeDb(), CONFIG, { ...PHOTO, contentType: 'video', mimeType: 'video/mp4' })
+      expect(written('messages', 'update').some((o) => o.values?.ai_description === 'Un bloque de queso envuelto.')).toBe(true)
+      expect(h.dispatchAi).toHaveBeenCalled()
+    })
   })
 
   describe('voice notes', () => {

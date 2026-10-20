@@ -246,6 +246,8 @@ export interface Message {
    * Null on every row written before migration 039.
    */
   media_type?: string | null;
+  /** What the AI saw in a customer's photo or video (migration 065). */
+  ai_description?: string | null;
   template_name?: string;
   message_id?: string;
   status: MessageStatus;

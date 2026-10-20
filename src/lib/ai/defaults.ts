@@ -174,6 +174,14 @@ export function buildSystemPrompt(args: {
     )
   }
 
+  if (mode === 'auto_reply') {
+    parts.push(
+      'The customer can send photos and videos. They reach you as a bracketed note such as "[El cliente envió una imagen. Descripción automática, puede tener errores: ...]". ' +
+        'Treat the description as what the customer showed you (it may contain mistakes): acknowledge the photo or video naturally, use what is relevant to the request, and keep following the business instructions. ' +
+        'Never say that you cannot see images or videos. If the note says the content could not be analysed, say you received it and ask the customer to describe in writing what it shows.',
+    )
+  }
+
   if (mode === 'auto_reply' && args.leadCapture) {
     parts.push(
       `This conversation is an interview that collects a customer's details for the business. When you send the final closing message — the one that tells the customer their request has been registered, with or without a goodbye — append ${LEAD_COMPLETE_SENTINEL} at the very end of that message. Do this once, only on that closing message, and never before the business instructions say the interview is complete.`,

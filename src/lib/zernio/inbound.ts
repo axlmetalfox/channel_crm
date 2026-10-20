@@ -10,6 +10,7 @@ import { mirrorInboundMedia, type MirrorStorage } from '@/lib/whatsapp/mirror-in
 import { loadAiConfig } from '@/lib/ai/config'
 import { logAiUsage } from '@/lib/ai/usage'
 import { AUDIO_MAX_BYTES, transcribeAudio, transcriptionModel } from '@/lib/ai/transcribe'
+import { IMAGE_MAX_BYTES, VIDEO_MAX_BYTES, describeMedia, mediaKindFor, visionModel } from '@/lib/ai/vision'
 import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import type { ZernioConfig } from './config'
@@ -203,6 +204,53 @@ async function transcribeVoiceNote(
   }
 }
 
+/**
+ * Describe a customer's photo or video with the account's AI key, so the
+ * agent can answer it. Returns null when the feature cannot run, the file is
+ * too big or cannot be read, or the provider fails: the agent is then told
+ * that something arrived but could not be analysed. Records the cost.
+ */
+async function describeCustomerMedia(
+  db: SupabaseClient,
+  accountId: string,
+  conversationId: string,
+  url: string,
+  mimeType: string | null,
+): Promise<string | null> {
+  try {
+    const ai = await loadAiConfig(db, accountId)
+    if (!ai || ai.provider !== 'openai') return null
+    const model = visionModel(ai.model)
+    if (!model) return null
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) })
+    if (!res.ok) return null
+    const mime = mimeType ?? res.headers.get('content-type')
+    const kind = mediaKindFor(mime)
+    if (!kind) return null
+    const data = new Uint8Array(await res.arrayBuffer())
+    if (data.byteLength === 0 || data.byteLength > (kind === 'video' ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES)) return null
+    const out = await describeMedia({
+      apiKey: ai.apiKey,
+      model,
+      data,
+      mimeType: mime as string,
+      timeoutMs: aiRequestTimeoutMs(),
+    })
+    void logAiUsage(db, {
+      accountId,
+      conversationId,
+      mode: 'media_describe',
+      provider: ai.provider,
+      model,
+      usage: out.usage,
+    })
+    return out.text
+  } catch (err) {
+    console.error('[zernio inbound] media description failed:', err)
+    return null
+  }
+}
+
 /** Process one customer message that arrived through Zernio. */
 export async function processZernioInbound(
   db: SupabaseClient,
@@ -303,6 +351,18 @@ export async function processZernioInbound(
             .eq('id', (inserted[0] as { id: string }).id)
         }
       }
+
+      // A photo or video: put what it shows in words, so the agent can
+      // answer it (and the advisor sees what the agent understood).
+      if (msg.contentType === 'image' || msg.contentType === 'video') {
+        const description = await describeCustomerMedia(db, config.accountId, conversation.id, mirrored, msg.mimeType)
+        if (description) {
+          await db
+            .from('messages')
+            .update({ ai_description: description })
+            .eq('id', (inserted[0] as { id: string }).id)
+        }
+      }
     }
   }
 
@@ -374,9 +434,10 @@ export async function processZernioInbound(
     // afterwards, the conversation starts normally.
     if (msg.referral === null && isSocialShareOnly(inboundText) && !(await botHasSpoken(db, conversation.id))) {
       console.info('[zernio inbound] first message is only a shared social link: no reply')
-    } else if (inboundText.trim()) {
-      // Text goes to the agent; anything else (voice note, photo…) gets a
-      // fixed "please write it" reply instead of silence.
+    } else if (inboundText.trim() || msg.contentType === 'image' || msg.contentType === 'video') {
+      // Text, a transcribed voice note, a photo or a video go to the agent
+      // (a photo or video reaches it as a description, or as a note that it
+      // arrived); anything else gets a fixed "please write it" reply.
       await dispatchInboundToAiReply(aiArgs)
     } else {
       await dispatchNonTextAutoReply(aiArgs)

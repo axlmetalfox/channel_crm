@@ -325,6 +325,7 @@
       "quickReplySaveError": "No se pudo guardar la respuesta rápida."
     },
     "bubble": {
+      "aiDescription": "Descripción automática",
       "photo": "Foto",
       "video": "Video",
       "audio": "Audio",

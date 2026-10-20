@@ -94,6 +94,11 @@ function MessageContent({
               {message.content_text}
             </p>
           )}
+          {message.ai_description && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs italic opacity-80">
+              {t("aiDescription")}: {message.ai_description}
+            </p>
+          )}
         </div>
       );
 
@@ -108,6 +113,11 @@ function MessageContent({
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {message.content_text}
+            </p>
+          )}
+          {message.ai_description && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs italic opacity-80">
+              {t("aiDescription")}: {message.ai_description}
             </p>
           )}
         </div>

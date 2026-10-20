@@ -46,6 +46,24 @@ describe('buildConversationContext', () => {
     ])
   })
 
+  it('includes photos and videos with their automatic description, and without one when it failed', async () => {
+    const out = await buildConversationContext(
+      fakeDb([
+        { sender_type: 'customer', content_type: 'video', content_text: null, ai_description: null },
+        { sender_type: 'customer', content_type: 'image', content_text: 'así lo quiero', ai_description: 'Una bolsa de café.' },
+      ]),
+      'conv-1',
+    )
+    expect(out).toEqual([
+      {
+        role: 'user',
+        content:
+          '[El cliente envió una imagen. Descripción automática, puede tener errores: Una bolsa de café. Texto que la acompaña: así lo quiero]',
+      },
+      { role: 'user', content: '[El cliente envió un video. No se pudo analizar el contenido.]' },
+    ])
+  })
+
   it('treats bot messages as assistant', async () => {
     const out = await buildConversationContext(
       fakeDb([{ sender_type: 'bot', content_text: 'auto reply' }]),

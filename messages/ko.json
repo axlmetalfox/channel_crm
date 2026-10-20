@@ -325,6 +325,7 @@
       "quickReplySaveError": "빠른 답장을 저장하지 못했습니다."
     },
     "bubble": {
+      "aiDescription": "자동 설명",
       "photo": "사진",
       "video": "동영상",
       "audio": "오디오",
