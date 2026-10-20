@@ -189,6 +189,25 @@ describe('submitManualLead', () => {
     expect(h.processIntake).toHaveBeenCalledTimes(1)
   })
 
+  it('sends the chat number even if the form carries another, and reports the typed one', async () => {
+    h.state.draftRow = draft()
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, whatsapp_number: '+573112580009' } }))
+    const payload = h.state.updated?.payload as { lead: { whatsapp_number: string }; whatsapp_reported: string | null }
+    expect(payload.lead.whatsapp_number).toBe('+573112580000')
+    expect(payload.whatsapp_reported).toBe('+573112580009')
+  })
+
+  it('keeps what the customer typed when the chat has no visible number', async () => {
+    h.state.draftRow = draft()
+    h.state.contactPhone = null
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await submitManualLead(fakeDb(), args())
+    const payload = h.state.updated?.payload as { lead: { whatsapp_number: string }; whatsapp_reported: string | null }
+    expect(payload.lead.whatsapp_number).toBe('+573112580000')
+    expect(payload.whatsapp_reported).toBeNull()
+  })
+
   it('sends the notes along, trimmed and capped', async () => {
     h.state.draftRow = draft()
     h.loadMessages.mockResolvedValue(customerSaid)

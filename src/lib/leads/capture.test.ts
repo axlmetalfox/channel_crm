@@ -369,6 +369,23 @@ describe('captureLead', () => {
     expect(h.state.updates.some((u) => 'payload' in u.values)).toBe(false)
   })
 
+  it('sends the number the customer wrote from when they typed a different one, and says so', async () => {
+    h.extractLead.mockResolvedValue({ lead: { ...LEAD, whatsapp_number: '+573112580001' }, usage: null })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    const payload = h.deliver.mock.calls[0][3]
+    expect(payload.lead.whatsapp_number).toBe('+573112580000')
+    expect(payload.lead.contact_phone).toBe('+573112580000')
+    expect(payload.whatsapp_reported).toBe('+573112580001')
+  })
+
+  it('does not flag a number that is only written differently', async () => {
+    h.extractLead.mockResolvedValue({ lead: { ...LEAD, whatsapp_number: '3112580000' }, usage: null })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    const payload = h.deliver.mock.calls[0][3]
+    expect(payload.lead.whatsapp_number).toBe('+573112580000')
+    expect(payload.whatsapp_reported).toBeNull()
+  })
+
   it('marks a lead without a first name incomplete', async () => {
     h.extractLead.mockResolvedValue({
       lead: { ...LEAD, first_name: null },

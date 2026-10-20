@@ -12,6 +12,7 @@ import {
   type CrmMatch,
 } from './lookup'
 import { consentFromNotice } from './consent'
+import { reconcileWhatsApp } from './phone'
 import { reportLeadConversion } from './conversion'
 
 // ============================================================
@@ -84,6 +85,9 @@ export interface LeadPayload {
   attribution: Attribution | null
   /** Set when a person sent the lead from the inbox instead of the AI. */
   registered_by: { user_id: string; name: string | null } | null
+  /** What the customer typed as their WhatsApp when it differed from the number
+   *  they wrote from (the chat's number is the one sent). */
+  whatsapp_reported?: string | null
   /** Free notes the agent added (manual leads only). */
   notes?: string | null
   transcript: { role: 'customer' | 'assistant'; text: string }[]
@@ -346,6 +350,11 @@ async function buildPayload(
   const previous = await previousLeadDetails(db, row.conversation_id)
   if (previous) lead = fillLeadFromRemembered(lead, previous)
 
+  // The WhatsApp number is the one the customer wrote from, not the one they
+  // typed (which they sometimes get wrong).
+  const reconciled = reconcileWhatsApp(lead, channelPhone)
+  lead = reconciled.lead
+
   // The account's data notice was sent first and the customer carried on:
   // that is the authorization, whatever the model read in the chat.
   const noticeConsent = await consentFromNotice(db, row.conversation_id, config.consentNotice)
@@ -397,6 +406,7 @@ async function buildPayload(
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution,
     registered_by: null,
+    whatsapp_reported: reconciled.reported,
     transcript: trimTranscript(transcript),
   }
   return { payload }

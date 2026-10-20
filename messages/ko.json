@@ -305,6 +305,7 @@
       "queued": "리드가 대기열에 있으며 몇 분 안에 전송됩니다",
       "errorNoMessages": "읽을 수 있는 텍스트 메시지가 없습니다.",
       "errorAiUnavailable": "이 계정에는 AI 어시스턴트가 설정되어 있지 않습니다.",
+      "whatsappLockedHint": "고객이 메시지를 보내는 번호입니다. 고객이 다른 번호를 입력했더라도 이 번호가 Zoho로 전송됩니다.",
       "consentConfirm": "고객에게 안내했고 개인정보 처리에 동의를 받았음을 확인합니다. Zoho에 제 이름으로 기록됩니다.",
       "errorConsent": "고객의 동의가 없습니다. 담당자 확인란을 체크한 후 전송하세요.",
       "errorIncomplete": "필수 정보가 없습니다: 이름, 성, WhatsApp, 이메일, 도시.",

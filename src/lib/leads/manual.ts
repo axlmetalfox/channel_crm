@@ -10,6 +10,7 @@ import {
   type CrmMatch,
 } from './lookup'
 import { consentFromNotice } from './consent'
+import { reconcileWhatsApp } from './phone'
 import { missingManualFields, unverifiedFields } from './evidence'
 import { judgeLead, LEAD_REQUEST_TYPES, parseLead, type Lead } from './schema'
 import {
@@ -86,6 +87,8 @@ export interface ManualLeadDraft {
   knownInCrm: boolean
   /** Whether the form is locked to data from the chat (the admin's switch). */
   validateData: boolean
+  /** The WhatsApp number is the chat's own (known): the form cannot change it. */
+  whatsappLocked: boolean
 }
 
 interface ConversationRow {
@@ -188,10 +191,14 @@ export async function prepareManualLead(
   const crm = conv.crm_match
   const knownInCrm = crm?.status === 'found' && !!crm.record
   if (knownInCrm && crm?.record) lead = fillLeadFromRecord(lead, crm.record, phone)
-  else if (!lead.whatsapp_number && phone) lead = { ...lead, whatsapp_number: `+${phone.replace(/\D/g, '')}` }
 
   const previous = await previousLeadDetails(db, conversationId)
   if (previous) lead = fillLeadFromRemembered(lead, previous)
+
+  // The WhatsApp number is the one the customer wrote from, not the one they
+  // typed (which they sometimes get wrong).
+  const reconciled = reconcileWhatsApp(lead, phone)
+  lead = reconciled.lead
 
   // Data notice sent first and the customer carried on: authorized.
   const noticeConsent = await consentFromNotice(db, conversationId, config.consentNotice)
@@ -216,7 +223,12 @@ export async function prepareManualLead(
       status: 'draft',
       source: 'manual',
       created_by_user_id: userId,
-      draft: { lead, consent_at: noticeConsent.at, consent_method: noticeConsent.given ? 'notice' : 'chat' },
+      draft: {
+        lead,
+        consent_at: noticeConsent.at,
+        consent_method: noticeConsent.given ? 'notice' : 'chat',
+        whatsapp_reported: reconciled.reported,
+      },
     })
     .select('id')
     .single()
@@ -232,6 +244,7 @@ export async function prepareManualLead(
     alreadyDeliveredAt: (delivered?.delivered_at as string | null | undefined) ?? null,
     knownInCrm,
     validateData: await validatesData(db, accountId),
+    whatsappLocked: !!phone,
   }
 }
 
@@ -242,7 +255,12 @@ interface DraftRow {
   contact_id: string | null
   status: string
   created_by_user_id: string | null
-  draft: { lead?: Lead; consent_at?: string | null; consent_method?: 'notice' | 'chat' } | null
+  draft: {
+    lead?: Lead
+    consent_at?: string | null
+    consent_method?: 'notice' | 'chat'
+    whatsapp_reported?: string | null
+  } | null
   created_at: string
 }
 
@@ -284,7 +302,7 @@ export async function submitManualLead(
   // carries her name as the one who vouches for it.
   const advisorConsent = !chatConsent && e.consent_confirmed === true
   const consent = chatConsent || advisorConsent
-  const lead = parseLead({
+  const parsedLead = parseLead({
     first_name: e.first_name,
     last_name: e.last_name,
     email: e.email,
@@ -299,9 +317,14 @@ export async function submitManualLead(
     request_type: LEAD_REQUEST_TYPES.find((t) => t === e.request_type),
     consent_given: consent,
   })
-  if (!lead) {
+  if (!parsedLead) {
     throw new ManualLeadError('invalid_lead', 'Describe the request and choose its type', 400)
   }
+  // Whatever the form says, the WhatsApp number sent is the chat's own.
+  const chatPhone = await channelPhone(db, row.contact_id)
+  const reconciled = reconcileWhatsApp(parsedLead, chatPhone)
+  const lead = reconciled.lead
+  const whatsappReported = reconciled.reported ?? row.draft?.whatsapp_reported ?? null
   if (judgeLead(lead) === 'no_consent') {
     throw new ManualLeadError(
       'consent_required',
@@ -354,7 +377,8 @@ export async function submitManualLead(
     intake_id: row.id,
     conversation_id: row.conversation_id,
     contact_id: row.contact_id,
-    channel_phone: await channelPhone(db, row.contact_id),
+    channel_phone: chatPhone,
+    whatsapp_reported: whatsappReported,
     lead: {
       ...leadFields,
       // No separate contact phone means the WhatsApp number is it.

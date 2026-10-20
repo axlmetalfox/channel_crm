@@ -72,6 +72,8 @@ interface Proposal {
   known_in_crm: boolean;
   /** The admin's switch: true = the form is locked to chat data. */
   validate_data: boolean;
+  /** The WhatsApp number is the one the customer wrote from and cannot be edited. */
+  whatsapp_locked?: boolean;
 }
 
 const EMPTY: LeadForm = {
@@ -263,17 +265,20 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
             set(key)(e.target.value);
             setFlagged((f) => f.filter((k) => k !== key));
           }}
-          readOnly={validate && !correcting}
+          readOnly={(validate && !correcting) || (key === "whatsapp_number" && !!proposal?.whatsapp_locked)}
           disabled={sending}
           aria-invalid={isFlagged || (required && !form[key].trim())}
           className={
             isFlagged
               ? "border-red-500"
-              : validate && !correcting
+              : (validate && !correcting) || (key === "whatsapp_number" && proposal?.whatsapp_locked)
                 ? "bg-muted/50 text-foreground"
                 : undefined
           }
         />
+        {key === "whatsapp_number" && proposal?.whatsapp_locked && (
+          <p className="text-[11px] text-muted-foreground">{t("whatsappLockedHint")}</p>
+        )}
       </div>
     );
   };

@@ -305,6 +305,7 @@
       "queued": "The lead is queued and will be sent in a few minutes",
       "errorNoMessages": "The conversation has no text messages to read.",
       "errorAiUnavailable": "The AI assistant is not set up for this account.",
+      "whatsappLockedHint": "This is the number the customer writes from; it is the one sent to Zoho even if the customer typed another.",
       "consentConfirm": "I confirm the customer was informed and authorized the processing of their personal data. It will be recorded under my name in Zoho.",
       "errorConsent": "The customer's authorization is missing: tick the advisor confirmation to send.",
       "errorIncomplete": "Required details are missing: name, surname, WhatsApp, email and city.",

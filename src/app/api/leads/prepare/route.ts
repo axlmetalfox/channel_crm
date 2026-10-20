@@ -51,6 +51,7 @@ export async function POST(request: Request) {
       already_delivered_at: draft.alreadyDeliveredAt,
       known_in_crm: draft.knownInCrm,
       validate_data: draft.validateData,
+      whatsapp_locked: draft.whatsappLocked,
     })
   } catch (err) {
     if (err instanceof ManualLeadError) {

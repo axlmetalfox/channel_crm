@@ -305,6 +305,7 @@
       "queued": "El lead quedó en cola y se enviará en unos minutos",
       "errorNoMessages": "La conversación no tiene mensajes de texto que leer.",
       "errorAiUnavailable": "El asistente de IA no está configurado en esta cuenta.",
+      "whatsappLockedHint": "Es el número desde el que escribe el cliente; es el que se envía a Zoho aunque el cliente haya escrito otro.",
       "consentConfirm": "Confirmo que el cliente fue informado y autorizó el tratamiento de sus datos personales. Quedará registrado a mi nombre en Zoho.",
       "errorConsent": "Falta la autorización del cliente: marca la confirmación del asesor para enviar.",
       "errorIncomplete": "Faltan datos obligatorios: nombre, apellido, WhatsApp, correo y ciudad.",
