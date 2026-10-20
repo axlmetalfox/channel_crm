@@ -30,7 +30,7 @@ describe('runAutoAssign', () => {
     cursor: undefined as string | undefined,
     lt: undefined as string | undefined,
     gte: undefined as string | undefined,
-    order: undefined as { col: string; ascending: boolean } | undefined,
+    orders: [] as { col: string; ascending: boolean }[],
     limit: undefined as number | undefined,
     profileFilters: [] as [string, unknown][],
   }
@@ -51,7 +51,7 @@ describe('runAutoAssign', () => {
         b.lt = (_c: string, v: string) => ((state.lt = v), b)
         b.gte = (_c: string, v: string) => ((state.gte = v), b)
         b.order = (col: string, opts?: { ascending?: boolean }) => {
-          if (table === 'conversations') state.order = { col, ascending: opts?.ascending !== false }
+          if (table === 'conversations') state.orders.push({ col, ascending: opts?.ascending !== false })
           return b
         }
         b.limit = (n: number) => {
@@ -117,7 +117,7 @@ describe('runAutoAssign', () => {
     state.cursor = undefined
     state.lt = undefined
     state.gte = undefined
-    state.order = undefined
+    state.orders = []
     state.limit = undefined
     state.profileFilters = []
   })
@@ -164,7 +164,11 @@ describe('runAutoAssign', () => {
 
   it('takes the most recent conversations first and ignores the ones that are too old', async () => {
     await runAutoAssign(fakeDb(), NOW)
-    expect(state.order).toEqual({ col: 'last_message_at', ascending: false })
+    // Open conversations (the customer waits for us) before pending ones, then freshest first.
+    expect(state.orders).toEqual([
+      { col: 'status', ascending: true },
+      { col: 'last_message_at', ascending: false },
+    ])
     // Seven days back from the run.
     expect(state.gte).toBe('2026-10-09T17:00:00.000Z')
     state.accounts = [rule({ auto_assign_max_age_days: 2 })]

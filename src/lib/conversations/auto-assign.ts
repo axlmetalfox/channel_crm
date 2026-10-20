@@ -159,8 +159,11 @@ async function assignForAccount(
     .not('last_message_at', 'is', null)
     .lt('last_message_at', cutoff)
     .gte('last_message_at', oldest)
-    // Gradual and recent first: a few per agent per sweep, the freshest leads
-    // before the ones that have been cold for days.
+    // Gradual: a few per agent per sweep. Open conversations (the customer is
+    // waiting for us; "open" sorts before "pending") go first, then the pending
+    // ones (the ball is in the customer's court); within each, the freshest
+    // leads before the ones that have been cold for days.
+    .order('status', { ascending: true })
     .order('last_message_at', { ascending: false })
     .limit(agents.length * account.auto_assign_batch_per_agent)
   const ids = ((stalled ?? []) as { id: string }[]).map((r) => r.id)
@@ -234,7 +237,9 @@ async function assignEverything(
       .not('last_message_at', 'is', null)
       .lt('last_message_at', cutoff)
       .gte('last_message_at', oldest)
-      // Freshest first, so everyone gets a mix of recent and older chats.
+      // Open before pending, then freshest first, so everyone gets a mix of
+      // recent and older chats.
+      .order('status', { ascending: true })
       .order('last_message_at', { ascending: false })
       .range(page * PAGE, page * PAGE + PAGE - 1)
     const rows = (data ?? []) as { id: string }[]
