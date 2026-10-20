@@ -426,6 +426,7 @@
       "selectedCount": "{count}개 선택됨",
       "clearSelection": "지우기",
       "deleteSelected": "선택 항목 삭제",
+      "selectAllMatching": "이 필터의 연락처 {count}개 모두 선택",
       "addTagSelected": "태그 추가",
       "removeTagSelected": "태그 제거",
       "toastBulkTagAdded": "“{tag}” 태그를 {count}개 연락처에 추가했습니다",

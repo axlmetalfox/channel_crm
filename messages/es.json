@@ -426,6 +426,7 @@
       "selectedCount": "{count} seleccionados",
       "clearSelection": "Limpiar",
       "deleteSelected": "Eliminar seleccionados",
+      "selectAllMatching": "Seleccionar los {count} contactos de este filtro",
       "addTagSelected": "Agregar etiqueta",
       "removeTagSelected": "Quitar etiqueta",
       "toastBulkTagAdded": "Etiqueta «{tag}» agregada a {count, plural, one {# contacto} other {# contactos}}",

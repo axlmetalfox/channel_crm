@@ -426,6 +426,7 @@
       "selectedCount": "{count} selected",
       "clearSelection": "Clear",
       "deleteSelected": "Delete selected",
+      "selectAllMatching": "Select all {count} contacts in this filter",
       "addTagSelected": "Add tag",
       "removeTagSelected": "Remove tag",
       "toastBulkTagAdded": "Tag “{tag}” added to {count, plural, one {# contact} other {# contacts}}",

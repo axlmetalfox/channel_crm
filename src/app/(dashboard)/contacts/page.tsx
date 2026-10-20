@@ -62,6 +62,8 @@ import { GatedButton } from '@/components/ui/gated-button';
 import { useTranslations } from 'next-intl';
 
 const PAGE_SIZE = 25;
+// Contacts per request when a bulk tag change covers the whole filter.
+const BULK_ID_CHUNK = 500;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
@@ -97,6 +99,9 @@ export default function ContactsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkTagging, setBulkTagging] = useState(false);
+  // "Select all N": the selection covers every contact matching the current
+  // search / tag filter, not just the rows on this page.
+  const [allMatching, setAllMatching] = useState(false);
 
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
@@ -129,6 +134,7 @@ export default function ContactsPage() {
     // referred to the old page/search results so the bulk bar can't
     // act on rows the user can no longer see.
     setSelected(new Set());
+    setAllMatching(false);
 
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -318,13 +324,56 @@ export default function ContactsPage() {
     setBulkDeleteOpen(false);
   }
 
+  // Ids of every contact matching the current search / tag filter, read in
+  // chunks (the same filters fetchContacts applies to a page).
+  async function fetchAllMatchingIds(): Promise<string[]> {
+    const term = search.trim();
+    const ids: string[] = [];
+    for (let offset = 0; offset < totalCount; offset += BULK_ID_CHUNK) {
+      if (selectedTagIds.length > 0) {
+        const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+          p_tag_ids: selectedTagIds,
+          p_search: term || null,
+          p_limit: BULK_ID_CHUNK,
+          p_offset: offset,
+        });
+        if (error) throw error;
+        const rows = (data ?? []) as { contact: Contact }[];
+        ids.push(...rows.map((r) => r.contact.id));
+        if (rows.length < BULK_ID_CHUNK) break;
+      } else {
+        let query = supabase
+          .from('contacts')
+          .select('id')
+          .order('created_at', { ascending: false })
+          .range(offset, offset + BULK_ID_CHUNK - 1);
+        if (term) {
+          const like = `%${term}%`;
+          query = query.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+        }
+        const { data, error } = await query;
+        if (error) throw error;
+        ids.push(...(data ?? []).map((r: { id: string }) => r.id));
+        if ((data ?? []).length < BULK_ID_CHUNK) break;
+      }
+    }
+    return ids;
+  }
+
   async function handleBulkTag(tagId: string, action: 'add' | 'remove') {
-    const ids = [...selected];
-    if (ids.length === 0) return;
+    if (selected.size === 0 && !allMatching) return;
     const tag = tagsMap[tagId];
     setBulkTagging(true);
     try {
-      const result = await bulkContactTag(ids, tagId, action);
+      const ids = allMatching ? await fetchAllMatchingIds() : [...selected];
+      let added = 0;
+      let removed = 0;
+      for (let i = 0; i < ids.length; i += BULK_ID_CHUNK) {
+        const part = await bulkContactTag(ids.slice(i, i + BULK_ID_CHUNK), tagId, action);
+        added += part.added;
+        removed += part.removed;
+      }
+      const result = { added, removed };
       toast.success(
         action === 'add'
           ? t('toastBulkTagAdded', { tag: tag?.name ?? '', count: result.added })
@@ -524,14 +573,28 @@ export default function ContactsPage() {
       {/* Bulk action bar */}
       {selected.size > 0 && (
         <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2">
-          <p className="text-sm text-foreground">
-            {t('selectedCount', { count: selected.size })}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="text-sm text-foreground">
+              {t('selectedCount', { count: allMatching ? totalCount : selected.size })}
+            </p>
+            {!allMatching && allOnPageSelected && totalCount > contacts.length && (
+              <button
+                type="button"
+                onClick={() => setAllMatching(true)}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                {t('selectAllMatching', { count: totalCount })}
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSelected(new Set())}
+              onClick={() => {
+                setSelected(new Set());
+                setAllMatching(false);
+              }}
               className="text-muted-foreground hover:text-foreground"
             >
               {t('clearSelection')}
@@ -569,6 +632,7 @@ export default function ContactsPage() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ))}
+            {!allMatching && (
             <GatedButton
               variant="destructive"
               size="sm"
@@ -579,6 +643,7 @@ export default function ContactsPage() {
               <Trash2 className="size-4" />
               {t('deleteSelected')}
             </GatedButton>
+            )}
           </div>
         </div>
       )}
