@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -130,6 +131,9 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
   const [flagged, setFlagged] = useState<string[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const keepNotes = useRef(false);
+  // The advisor vouches for the data-processing authorization when the chat
+  // does not show it (older conversations, from before the data notice).
+  const [advisorConsent, setAdvisorConsent] = useState(false);
 
   const errorText = useCallback(
     (code: string | undefined) => {
@@ -164,6 +168,7 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
     setProposal(null);
     setFlagged([]);
     setCorrecting(false);
+    setAdvisorConsent(false);
     (async () => {
       try {
         const res = await fetch("/api/leads/prepare", {
@@ -200,7 +205,7 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
   const missing = REQUIRED.filter((key) => !form[key].trim());
   const canSend =
     !!proposal &&
-    proposal.consent_given &&
+    (proposal.consent_given || advisorConsent) &&
     !sending &&
     missing.length === 0 &&
     form.request_summary.trim().length > 0;
@@ -217,7 +222,10 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
       const res = await fetch("/api/leads/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intake_id: proposal.intake_id, lead: form }),
+        body: JSON.stringify({
+          intake_id: proposal.intake_id,
+          lead: { ...form, consent_confirmed: !proposal.consent_given && advisorConsent },
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -294,9 +302,20 @@ export function SendToZohoDialog({ open, onOpenChange, conversationId, onSent }:
         {proposal && (
           <div className="space-y-4">
             {!proposal.consent_given && (
-              <div className="flex gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                <span>{t("noConsent")}</span>
+              <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-500">
+                <div className="flex gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                  <span>{t("noConsent")}</span>
+                </div>
+                <label className="flex cursor-pointer items-start gap-2 text-foreground">
+                  <Checkbox
+                    checked={advisorConsent}
+                    onCheckedChange={(checked) => setAdvisorConsent(checked === true)}
+                    className="mt-0.5"
+                    aria-label={t("consentConfirm")}
+                  />
+                  <span>{t("consentConfirm")}</span>
+                </label>
               </div>
             )}
             {proposal.already_delivered_at && (

@@ -70,7 +70,14 @@ export interface LeadPayload {
   /** The number the conversation runs on, as WhatsApp reports it. */
   channel_phone: string | null
   lead: Omit<Lead, 'consent_given'>
-  consent: { given: true; captured_at: string; method: 'notice' | 'chat' }
+  consent: {
+    given: true
+    captured_at: string
+    /** 'advisor': nothing in the chat shows it; the advisor who sent the lead
+     *  confirmed that the customer was informed and authorized (`confirmed_by`). */
+    method: 'notice' | 'chat' | 'advisor'
+    confirmed_by?: { user_id: string; name: string | null }
+  }
   /** Set when the customer was already registered in the CRM. */
   existing_record: { module: string; id: string } | null
   /** The ad or post the customer's chat started from, when it did. */

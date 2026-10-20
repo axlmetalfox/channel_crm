@@ -277,8 +277,13 @@ export async function submitManualLead(
     throw new ManualLeadError('already_submitted', 'This lead was already sent', 409)
   }
 
-  const consent = row.draft?.lead?.consent_given === true
+  const chatConsent = row.draft?.lead?.consent_given === true
   const e = (args.edits && typeof args.edits === 'object' ? args.edits : {}) as Record<string, unknown>
+  // Nothing in the chat shows the authorization (an older conversation, from
+  // before the data notice): the advisor can confirm it herself, and the lead
+  // carries her name as the one who vouches for it.
+  const advisorConsent = !chatConsent && e.consent_confirmed === true
+  const consent = chatConsent || advisorConsent
   const lead = parseLead({
     first_name: e.first_name,
     last_name: e.last_name,
@@ -355,11 +360,18 @@ export async function submitManualLead(
       // No separate contact phone means the WhatsApp number is it.
       contact_phone: lead.contact_phone ?? lead.whatsapp_number,
     },
-    consent: {
-      given: true,
-      captured_at: row.draft?.consent_at ?? row.created_at,
-      method: row.draft?.consent_method ?? 'chat',
-    },
+    consent: advisorConsent
+      ? {
+          given: true,
+          captured_at: new Date().toISOString(),
+          method: 'advisor',
+          confirmed_by: { user_id: userId, name: userName },
+        }
+      : {
+          given: true,
+          captured_at: row.draft?.consent_at ?? row.created_at,
+          method: row.draft?.consent_method ?? 'chat',
+        },
     existing_record:
       crm?.status === 'found' && crm.id ? { module: crm.module ?? 'Leads', id: crm.id } : null,
     attribution: conv?.attribution ?? null,

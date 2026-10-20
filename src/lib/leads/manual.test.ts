@@ -256,6 +256,30 @@ describe('submitManualLead', () => {
     expect(h.processIntake).not.toHaveBeenCalled()
   })
 
+  it('lets the advisor confirm the authorization when the chat does not show it, and records her name', async () => {
+    h.state.draftRow = draft(false)
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, consent_confirmed: true } }))
+    expect(h.state.updated?.payload).toMatchObject({
+      consent: {
+        given: true,
+        method: 'advisor',
+        confirmed_by: { user_id: 'user-1', name: 'Elcy Cubillos' },
+      },
+    })
+  })
+
+  it('does not take the advisor confirmation as anything but true, nor use it when the chat already shows consent', async () => {
+    h.state.draftRow = draft(false)
+    await expect(
+      submitManualLead(fakeDb(), args({ edits: { ...edits, consent_confirmed: 'yes' } })),
+    ).rejects.toMatchObject({ code: 'consent_required' })
+    h.state.draftRow = draft(true)
+    h.loadMessages.mockResolvedValue(customerSaid)
+    await submitManualLead(fakeDb(), args({ edits: { ...edits, consent_confirmed: true } }))
+    expect((h.state.updated?.payload as { consent: { method: string } }).consent.method).not.toBe('advisor')
+  })
+
   it('refuses someone else\'s draft, a sent draft and an unusable form', async () => {
     h.state.draftRow = draft(true, 'someone-else')
     await expect(submitManualLead(fakeDb(), args())).rejects.toMatchObject({ code: 'not_found' })
