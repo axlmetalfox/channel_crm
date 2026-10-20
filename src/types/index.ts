@@ -174,11 +174,22 @@ export interface ConversationAttribution {
   captured_at: string;
 }
 
+/** An account-defined label for where a conversation stands (migration 067). */
+export interface ConversationStage {
+  id: string;
+  account_id: string;
+  name: string;
+  color: string;
+  position: number;
+}
+
 export interface Conversation {
   id: string;
   user_id: string;
   contact_id: string;
   status: ConversationStatus;
+  /** The account's own stage for this chat, or null (migration 067). */
+  stage_id?: string | null;
   assigned_agent_id?: string;
   last_message_text?: string;
   last_message_at?: string;

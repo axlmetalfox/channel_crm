@@ -546,6 +546,18 @@ function InboxPageInner() {
     [activeConversation]
   );
 
+  const handleStageChange = useCallback(
+    (conversationId: string, stageId: string | null) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversationId ? { ...c, stage_id: stageId } : c))
+      );
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation((prev) => (prev ? { ...prev, stage_id: stageId } : prev));
+      }
+    },
+    [activeConversation]
+  );
+
   const handleAssignChange = useCallback(
     (conversationId: string, assignedAgentId: string | null) => {
       setConversations((prev) =>
@@ -636,6 +648,7 @@ function InboxPageInner() {
             onNewMessage={handleNewMessage}
             onUpdateMessage={handleUpdateMessage}
             onStatusChange={handleStatusChange}
+            onStageChange={handleStageChange}
             onAssignChange={handleAssignChange}
             onConversationGone={handleConversationGone}
             onBack={handleCloseConversation}

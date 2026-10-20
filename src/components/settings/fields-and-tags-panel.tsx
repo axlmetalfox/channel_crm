@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { CustomFieldsSettings } from './custom-fields-settings';
 import { SettingsPanelHead } from './settings-panel-head';
 import { TagManager } from './tag-manager';
+import { ConversationStagesManager } from './conversation-stages-manager';
 
 /**
  * "Fields & tags" section — merges the former Tags and Custom Fields
@@ -26,6 +27,7 @@ export function FieldsAndTagsPanel() {
         description={t('description')}
       />
       <TagManager />
+      {canEditSettings ? <ConversationStagesManager /> : null}
       {canEditSettings ? <CustomFieldsSettings /> : null}
     </section>
   );

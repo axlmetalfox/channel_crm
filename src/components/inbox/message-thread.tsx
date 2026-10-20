@@ -27,7 +27,7 @@ import {
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
-  PanelRightClose, ClipboardCheck, Ban, ShieldAlert, ShieldCheck } from "lucide-react";
+  PanelRightClose, ClipboardCheck, Ban, ShieldAlert, ShieldCheck, Layers } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,7 @@ import { BlockContactDialog, whatsappOutcomeKey } from "./block-contact-dialog";
 import { unblockContact } from "@/lib/contacts/block-api";
 import type { BlockReason } from "@/lib/contacts/block-reasons";
 import { hasHumanReply, isMediaBlurred } from "@/lib/inbox/media-blur";
+import { useConversationStages } from "@/hooks/use-conversation-stages";
 import { buildReplyPreview } from "./reply-quote";
 import { renderTemplateBody } from "@/lib/whatsapp/template-body";
 import { toast } from "sonner";
@@ -75,6 +76,8 @@ interface MessageThreadProps {
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
+  /** The account's own stage for the chat changed (null = no stage). */
+  onStageChange?: (conversationId: string, stageId: string | null) => void;
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
@@ -165,6 +168,7 @@ export function MessageThread({
   onNewMessage,
   onUpdateMessage,
   onStatusChange,
+  onStageChange,
   onAssignChange,
   onConversationGone,
   onBack,
@@ -185,6 +189,8 @@ export function MessageThread({
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [zohoOpen, setZohoOpen] = useState(false);
   const canSendToCrm = useCan("send-messages");
+  const { stages, byId: stagesById } = useConversationStages();
+  const currentStage = conversation?.stage_id ? (stagesById.get(conversation.stage_id) ?? null) : null;
   // Blocking abusive or fake contacts: anyone who answers chats can block;
   // lifting the block is for admins and the owner.
   const canBlock = useCan("send-messages");
@@ -688,6 +694,23 @@ export function MessageThread({
     [conversation, onStatusChange]
   );
 
+  const handleStageChange = useCallback(
+    async (stageId: string | null) => {
+      if (!conversation) return;
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ stage_id: stageId })
+        .eq("id", conversation.id);
+      if (error) {
+        toast.error(t("stageError"));
+        return;
+      }
+      onStageChange?.(conversation.id, stageId);
+    },
+    [conversation, onStageChange, t]
+  );
+
   const handleOpenTemplates = useCallback(() => {
     setTemplateModalOpen(true);
   }, []);
@@ -1136,6 +1159,50 @@ export function MessageThread({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Stage dropdown — the account's own labels (Settings > Fields & tags) */}
+          {stages.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                title={t("stageTitle")}
+                className={cn(
+                  "inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs hover:bg-muted",
+                  currentStage ? "" : "text-muted-foreground",
+                )}
+                style={currentStage ? { color: currentStage.color } : undefined}
+              >
+                <Layers className="h-3 w-3" />
+                <span className="hidden max-w-32 truncate sm:inline">
+                  {currentStage ? currentStage.name : t("stage")}
+                </span>
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="border-border bg-popover">
+                {stages.map((s) => (
+                  <DropdownMenuItem
+                    key={s.id}
+                    onClick={() => handleStageChange(s.id)}
+                    className="text-sm text-popover-foreground"
+                  >
+                    <span className="mr-2 size-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span className="flex-1">{s.name}</span>
+                    {s.id === conversation.stage_id && <Check className="ml-2 h-3 w-3" />}
+                  </DropdownMenuItem>
+                ))}
+                {conversation.stage_id && (
+                  <>
+                    <DropdownMenuSeparator className="bg-border" />
+                    <DropdownMenuItem
+                      onClick={() => handleStageChange(null)}
+                      className="text-sm text-muted-foreground"
+                    >
+                      {t("stageNone")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {/* Assign dropdown */}
           <DropdownMenu>

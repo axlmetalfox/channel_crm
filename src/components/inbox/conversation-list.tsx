@@ -9,7 +9,8 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, ListChecks, LayoutTemplate, Loader2 } from "lucide-react";
+import { Search, ChevronDown, X, ListChecks, LayoutTemplate, Loader2, Layers } from "lucide-react";
+import { useConversationStages } from "@/hooks/use-conversation-stages";
 import { toast } from "sonner";
 import { bulkContactTag } from "@/lib/contacts/tag-api";
 import { useCan } from "@/hooks/use-can";
@@ -97,6 +98,9 @@ export function ConversationList({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // The account's own stages: filter by one, and set one on many chats.
+  const { stages, byId: stagesById } = useConversationStages();
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
 
   // Selection mode: tick conversations (or all the filtered ones) and add or
   // remove a tag on their contacts in one go.
@@ -225,6 +229,10 @@ export function ConversationList({
       );
     }
 
+    if (selectedStageId !== null) {
+      result = result.filter((c) => (selectedStageId === "none" ? !c.stage_id : c.stage_id === selectedStageId));
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) => {
@@ -236,7 +244,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, selectedTagIds, selectedCompany, selectedStageId]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -336,6 +344,26 @@ export function ConversationList({
     else toast.success(summary);
     exitSelecting();
   }, [bulkPlan, exitSelecting, t]);
+
+  const handleBulkStage = useCallback(
+    async (stageId: string | null) => {
+      const ids = conversations.filter((c) => checkedIds.has(c.id)).map((c) => c.id);
+      if (ids.length === 0) return;
+      setBulkBusy(true);
+      const supabase = createClient();
+      const { error } = await supabase.from("conversations").update({ stage_id: stageId }).in("id", ids);
+      if (error) {
+        toast.error(t("bulkStageFailed"));
+      } else {
+        const touched = new Set(ids);
+        onConversationsLoaded(conversations.map((c) => (touched.has(c.id) ? { ...c, stage_id: stageId } : c)));
+        toast.success(t("bulkStageDone", { count: ids.length }));
+        exitSelecting();
+      }
+      setBulkBusy(false);
+    },
+    [checkedIds, conversations, exitSelecting, onConversationsLoaded, t]
+  );
 
   const handleBulkTag = useCallback(
     async (tagId: string, action: "add" | "remove") => {
@@ -497,6 +525,47 @@ export function ConversationList({
             </button>
           )}
 
+          {stages.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  "inline-flex max-w-40 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  selectedStageId ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span className="truncate">
+                  {selectedStageId === "none"
+                    ? t("noStage")
+                    : selectedStageId
+                      ? (stagesById.get(selectedStageId)?.name ?? t("stage"))
+                      : t("stage")}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-64 w-56 border-border bg-popover">
+                <DropdownMenuItem onClick={() => setSelectedStageId(null)} className="text-sm text-popover-foreground">
+                  {t("allStages")}
+                </DropdownMenuItem>
+                {stages.map((s) => (
+                  <DropdownMenuItem
+                    key={s.id}
+                    onClick={() => setSelectedStageId(s.id)}
+                    className={cn("text-sm", selectedStageId === s.id ? "text-primary" : "text-popover-foreground")}
+                  >
+                    <span className="mr-2 size-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span className="truncate">{s.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem
+                  onClick={() => setSelectedStageId("none")}
+                  className={cn("text-sm", selectedStageId === "none" ? "text-primary" : "text-muted-foreground")}
+                >
+                  {t("noStage")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           {companies.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -596,6 +665,33 @@ export function ConversationList({
               ? t("selectedCount", { count: checkedIds.size })
               : t("selectAllFiltered", { count: filtered.length })}
           </label>
+          {stages.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={bulkBusy || checkedIds.size === 0}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-foreground hover:bg-muted disabled:opacity-50"
+              >
+                <Layers className="h-3 w-3" />
+                {t("setStage")}
+                <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-64 w-56 border-border bg-popover">
+                {stages.map((s) => (
+                  <DropdownMenuItem
+                    key={s.id}
+                    onClick={() => handleBulkStage(s.id)}
+                    className="text-sm text-popover-foreground"
+                  >
+                    <span className="mr-2 size-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span className="truncate">{s.name}</span>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem onClick={() => handleBulkStage(null)} className="text-sm text-muted-foreground">
+                  {t("noStage")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <button
             type="button"
             disabled={bulkBusy || checkedIds.size === 0}
@@ -724,6 +820,7 @@ export function ConversationList({
                 conversation={conv}
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
+                stage={conv.stage_id ? (stagesById.get(conv.stage_id) ?? null) : null}
                 selecting={selecting}
                 checked={checkedIds.has(conv.id)}
                 onToggleChecked={toggleChecked}
@@ -741,6 +838,7 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  stage: { name: string; color: string } | null;
   selecting: boolean;
   checked: boolean;
   onToggleChecked: (id: string) => void;
@@ -751,6 +849,7 @@ function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  stage,
   selecting,
   checked,
   onToggleChecked,
@@ -816,6 +915,15 @@ function ConversationItem({
           <p className="truncate text-xs text-muted-foreground">
             {conversation.last_message_text || t("noMessagesYet")}
           </p>
+          {stage && (
+            <span
+              className="max-w-28 shrink-0 truncate rounded-full px-1.5 py-px text-[9px] font-medium"
+              style={{ backgroundColor: `${stage.color}20`, color: stage.color }}
+              title={stage.name}
+            >
+              {stage.name}
+            </span>
+          )}
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (
               <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
