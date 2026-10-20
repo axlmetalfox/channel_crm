@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import { resolveQuickReplyStage } from '@/lib/quick-replies-stage'
 
 // Update / delete a single quick reply. Quick replies are account-
 // shared, so every mutation is scoped by `account_id` (the service-role
@@ -66,6 +67,14 @@ export async function PATCH(
       }
       update.interactive_payload = body.interactive_payload ?? null
     }
+  }
+
+  if ('stage_id' in body) {
+    const stageId = await resolveQuickReplyStage(supabaseAdmin(), ctx.accountId, body.stage_id)
+    if (stageId === undefined) {
+      return NextResponse.json({ error: 'stage_id is not a stage of this account' }, { status: 400 })
+    }
+    update.stage_id = stageId
   }
 
   if (Object.keys(update).length === 0) {

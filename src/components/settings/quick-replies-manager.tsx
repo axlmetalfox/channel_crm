@@ -25,6 +25,7 @@ import {
   type InteractiveMessagePayload,
 } from "@/lib/whatsapp/interactive";
 import type { QuickReply, QuickReplyKind } from "@/types";
+import { useConversationStages } from "@/hooks/use-conversation-stages";
 
 interface DraftState {
   id?: string;
@@ -32,6 +33,8 @@ interface DraftState {
   kind: QuickReplyKind;
   content_text: string;
   interactive_payload: InteractiveMessagePayload;
+  /** Stage the chat moves to when this reply is sent ("" = none). */
+  stage_id: string;
 }
 
 function emptyDraft(): DraftState {
@@ -40,11 +43,13 @@ function emptyDraft(): DraftState {
     kind: "text",
     content_text: "",
     interactive_payload: blankButtonsPayload(),
+    stage_id: "",
   };
 }
 
 export function QuickRepliesManager() {
   const t = useTranslations("QuickReplies");
+  const { stages } = useConversationStages();
   const [items, setItems] = useState<QuickReply[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -74,6 +79,7 @@ export function QuickRepliesManager() {
       content_text: qr.content_text ?? "",
       interactive_payload:
         qr.interactive_payload ?? blankButtonsPayload(),
+      stage_id: qr.stage_id ?? "",
     });
 
   const save = useCallback(async () => {
@@ -84,8 +90,8 @@ export function QuickRepliesManager() {
     }
     const payload =
       draft.kind === "interactive"
-        ? { title: draft.title, kind: "interactive", interactive_payload: draft.interactive_payload }
-        : { title: draft.title, kind: "text", content_text: draft.content_text };
+        ? { title: draft.title, kind: "interactive", interactive_payload: draft.interactive_payload, stage_id: draft.stage_id || null }
+        : { title: draft.title, kind: "text", content_text: draft.content_text, stage_id: draft.stage_id || null };
 
     setSaving(true);
     try {
@@ -212,6 +218,24 @@ export function QuickRepliesManager() {
                   onClick={() => setDraft({ ...draft, kind: "interactive" })}
                 />
               </div>
+              {stages.length > 0 && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">{t("stageLabel")}</label>
+                  <select
+                    value={draft.stage_id}
+                    onChange={(e) => setDraft({ ...draft, stage_id: e.target.value })}
+                    className="h-9 w-full rounded-md border border-border bg-muted px-2 text-sm text-foreground"
+                  >
+                    <option value="">{t("stageNone")}</option>
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("stageHint")}</p>
+                </div>
+              )}
               {draft.kind === "text" ? (
                 <Textarea
                   value={draft.content_text}

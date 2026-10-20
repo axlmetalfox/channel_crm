@@ -174,6 +174,9 @@ export interface ConversationAttribution {
   captured_at: string;
 }
 
+/** Events a stage can be tied to so a chat moves to it on its own (migration 068). */
+export type StageTrigger = 'ai_answering' | 'advisor_assigned' | 'lead_sent';
+
 /** An account-defined label for where a conversation stands (migration 067). */
 export interface ConversationStage {
   id: string;
@@ -181,6 +184,8 @@ export interface ConversationStage {
   name: string;
   color: string;
   position: number;
+  /** When set, a chat moves here (forward only) when the event happens. */
+  auto_trigger?: StageTrigger | null;
 }
 
 export interface Conversation {
@@ -711,6 +716,8 @@ export interface QuickReply {
   content_text?: string | null;
   /** Set when `kind === 'interactive'`. */
   interactive_payload?: InteractiveMessagePayload | null;
+  /** Sending this quick reply moves the chat to this stage (migration 068). */
+  stage_id?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowDown, ArrowUp, Layers, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Layers, Loader2, Plus, Trash2, Wand2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -27,13 +27,15 @@ import { cn } from '@/lib/utils';
 import {
   STAGE_COLORS,
   STAGE_NAME_MAX,
+  STAGE_TRIGGERS,
+  isStageTrigger,
   cleanStageName,
   moveStage,
   nextStagePosition,
   sortStages,
   stageNameTaken,
 } from '@/lib/inbox/stages';
-import type { ConversationStage } from '@/types';
+import type { ConversationStage, StageTrigger } from '@/types';
 
 function ColorSwatches({
   value,
@@ -84,6 +86,7 @@ export function ConversationStagesManager() {
   const [saving, setSaving] = useState(false);
   const [toDelete, setToDelete] = useState<ConversationStage | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [applying, setApplying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,6 +180,50 @@ export function ConversationStagesManager() {
     setStages((prev) => prev.map((s) => (s.id === stage.id ? { ...s, color } : s)));
   }
 
+  // Tie a stage to an event (or none). One stage per event: whoever had it
+  // loses it first.
+  async function handleTrigger(stage: ConversationStage, raw: string) {
+    const next: StageTrigger | null = isStageTrigger(raw) ? raw : null;
+    if ((stage.auto_trigger ?? null) === next) return;
+    if (next) {
+      const holder = stages.find((s) => s.auto_trigger === next && s.id !== stage.id);
+      if (holder) {
+        const cleared = await supabase
+          .from('conversation_stages')
+          .update({ auto_trigger: null })
+          .eq('id', holder.id);
+        if (cleared.error) {
+          toast.error(t('saveError'));
+          return;
+        }
+      }
+    }
+    const { error } = await supabase
+      .from('conversation_stages')
+      .update({ auto_trigger: next })
+      .eq('id', stage.id);
+    if (error) {
+      toast.error(t('saveError'));
+      return;
+    }
+    await load();
+  }
+
+  // Fill the stage of the chats that have none yet, from what already happened.
+  async function handleApply() {
+    if (!window.confirm(t('applyConfirm'))) return;
+    setApplying(true);
+    const { data, error } = await supabase.rpc('apply_stage_automation');
+    setApplying(false);
+    if (error) {
+      console.error('apply_stage_automation failed:', error);
+      toast.error(t('applyError'));
+      return;
+    }
+    toast.success(t('applyDone', { count: Number(data ?? 0) }));
+    await load();
+  }
+
   async function handleMove(stage: ConversationStage, direction: 'up' | 'down') {
     const moves = moveStage(stages, stage.id, direction);
     if (!moves) return;
@@ -252,6 +299,20 @@ export function ConversationStagesManager() {
                     <span className="text-xs text-muted-foreground">
                       {t('usedBy', { count: usage[stage.id] ?? 0 })}
                     </span>
+                    <select
+                      value={stage.auto_trigger ?? ''}
+                      onChange={(e) => handleTrigger(stage, e.target.value)}
+                      aria-label={t('triggerLabel')}
+                      title={t('triggerLabel')}
+                      className="h-8 max-w-56 rounded-md border border-border bg-muted px-2 text-xs text-foreground"
+                    >
+                      <option value="">{t('triggerNone')}</option>
+                      {STAGE_TRIGGERS.map((trigger) => (
+                        <option key={trigger} value={trigger}>
+                          {t(`trigger_${trigger}`)}
+                        </option>
+                      ))}
+                    </select>
                     <div className="ml-auto flex items-center gap-1">
                       <Button
                         type="button"
@@ -287,6 +348,16 @@ export function ConversationStagesManager() {
                   </li>
                 ))}
               </ul>
+            )}
+
+            {stages.some((s) => s.auto_trigger) && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border p-3">
+                <p className="text-xs text-muted-foreground">{t('applyHint')}</p>
+                <Button type="button" variant="outline" size="sm" onClick={handleApply} disabled={applying}>
+                  {applying ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
+                  {t('apply')}
+                </Button>
+              </div>
             )}
 
             <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">

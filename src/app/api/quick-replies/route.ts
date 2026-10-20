@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import { resolveQuickReplyStage } from '@/lib/quick-replies-stage'
 
 // Quick replies — reusable snippets (plain text or a saved interactive
 // message) shared across the account. GET lists; POST creates. Mirrors
@@ -60,6 +61,11 @@ export async function POST(request: Request) {
     content_text = text
   }
 
+  const stageId = await resolveQuickReplyStage(supabaseAdmin(), ctx.accountId, body.stage_id)
+  if (stageId === undefined) {
+    return NextResponse.json({ error: 'stage_id is not a stage of this account' }, { status: 400 })
+  }
+
   const { data, error } = await supabaseAdmin()
     .from('quick_replies')
     .insert({
@@ -69,6 +75,7 @@ export async function POST(request: Request) {
       kind,
       content_text,
       interactive_payload,
+      stage_id: stageId,
     })
     .select()
     .single()

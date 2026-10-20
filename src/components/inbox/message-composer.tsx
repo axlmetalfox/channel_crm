@@ -118,6 +118,8 @@ interface MessageComposerProps {
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  /** A quick reply tied to a stage was sent: move the chat to that stage. */
+  onQuickReplyStage?: (stageId: string) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -140,6 +142,7 @@ export function MessageComposer({
   onOpenTemplates,
   replyTo,
   onClearReply,
+  onQuickReplyStage,
 }: MessageComposerProps) {
   const t = useTranslations("Inbox.composer");
 
@@ -154,6 +157,8 @@ export function MessageComposer({
     useState<InteractiveMessagePayload>(blankButtonsPayload);
   const [savingQuickReply, setSavingQuickReply] = useState(false);
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  // Stage of the quick reply the person picked; applied when it is sent.
+  const [pendingStage, setPendingStage] = useState<string | null>(null);
 
   // Media attachment state. `draft` holds an uploaded-but-not-yet-sent
   // attachment; `busy` covers the upload/transcode window.
@@ -227,6 +232,10 @@ export function MessageComposer({
     setSending(true);
     try {
       onSend(trimmed, replyTo?.id);
+      if (pendingStage) {
+        onQuickReplyStage?.(pendingStage);
+        setPendingStage(null);
+      }
       setText("");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
@@ -234,7 +243,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, pendingStage, onQuickReplyStage]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -315,9 +324,13 @@ export function MessageComposer({
       return;
     }
     onSendInteractive(interactivePayload, replyTo?.id);
+    if (pendingStage) {
+      onQuickReplyStage?.(pendingStage);
+      setPendingStage(null);
+    }
     setInteractiveOpen(false);
     onClearReply?.();
-  }, [interactivePayload, onSendInteractive, replyTo?.id, onClearReply]);
+  }, [interactivePayload, onSendInteractive, replyTo?.id, onClearReply, pendingStage, onQuickReplyStage]);
 
   // Persist the current builder payload as a reusable interactive snippet.
   const saveAsQuickReply = useCallback(async () => {
@@ -359,6 +372,7 @@ export function MessageComposer({
   const handlePickQuickReply = useCallback(
     (qr: QuickReply) => {
       setQuickReplyOpen(false);
+      setPendingStage(qr.stage_id ?? null);
       if (qr.kind === "interactive" && qr.interactive_payload) {
         openInteractiveBuilder(qr.interactive_payload);
         return;
