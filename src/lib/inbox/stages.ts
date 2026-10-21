@@ -1,7 +1,7 @@
 import type { ConversationStage, StageTrigger } from '@/types'
 
 /** The events a stage can be tied to, in the order a chat goes through them. */
-export const STAGE_TRIGGERS: StageTrigger[] = ['ai_answering', 'advisor_assigned', 'lead_sent']
+export const STAGE_TRIGGERS: StageTrigger[] = ['ai_answering', 'advisor_assigned', 'lead_sent', 'sales_rep_assigned']
 
 export function isStageTrigger(value: unknown): value is StageTrigger {
   return typeof value === 'string' && (STAGE_TRIGGERS as string[]).includes(value)

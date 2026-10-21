@@ -175,7 +175,7 @@ export interface ConversationAttribution {
 }
 
 /** Events a stage can be tied to so a chat moves to it on its own (migration 068). */
-export type StageTrigger = 'ai_answering' | 'advisor_assigned' | 'lead_sent';
+export type StageTrigger = 'ai_answering' | 'advisor_assigned' | 'lead_sent' | 'sales_rep_assigned';
 
 /** An account-defined label for where a conversation stands (migration 067). */
 export interface ConversationStage {
@@ -195,6 +195,10 @@ export interface Conversation {
   status: ConversationStatus;
   /** The account's own stage for this chat, or null (migration 067). */
   stage_id?: string | null;
+  /** The sales rep the CRM assigned to this customer (migration 069). */
+  sales_rep_name?: string | null;
+  sales_rep_assigned_at?: string | null;
+  zoho_lead_id?: string | null;
   assigned_agent_id?: string;
   last_message_text?: string;
   last_message_at?: string;

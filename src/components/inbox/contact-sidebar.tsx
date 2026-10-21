@@ -32,9 +32,11 @@ interface ContactSidebarProps {
   contact: Contact | null;
   /** The Meta ad / post this chat came from, when it came from one. */
   attribution?: ConversationAttribution | null;
+  /** The sales rep the CRM assigned to this customer, when it has. */
+  salesRepName?: string | null;
 }
 
-export function ContactSidebar({ contact, attribution = null }: ContactSidebarProps) {
+export function ContactSidebar({ contact, attribution = null, salesRepName = null }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -268,6 +270,16 @@ export function ContactSidebar({ contact, attribution = null }: ContactSidebarPr
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
+
+          {salesRepName && (
+            <>
+              <div className="rounded-lg bg-muted px-3 py-2 text-xs">
+                <p className="font-medium uppercase tracking-wider text-muted-foreground">{tSidebar("salesRep")}</p>
+                <p className="mt-0.5 text-sm font-medium text-foreground">{salesRepName}</p>
+              </div>
+              <div className="my-4 border-t border-border" />
+            </>
+          )}
 
           {/* Tags */}
           <div>
