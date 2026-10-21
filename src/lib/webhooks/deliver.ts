@@ -43,6 +43,8 @@ interface EndpointRow {
 export interface DeliveryResult {
   endpoints: number;
   delivered: number;
+  /** JSON bodies the accepting endpoints answered with (only present when there are any). */
+  responses?: unknown[];
 }
 
 /**
@@ -86,15 +88,17 @@ export async function deliverWebhookEvent(
     });
     const tsSeconds = Math.floor(Date.now() / 1000);
 
+    const responses: unknown[] = [];
     const results = await Promise.allSettled(
       (rows as EndpointRow[]).map((row) =>
-        deliverOne(db, row, event, payload, tsSeconds)
+        deliverOne(db, row, event, payload, tsSeconds, responses)
       )
     );
     return {
       endpoints: rows.length,
       delivered: results.filter((r) => r.status === 'fulfilled' && r.value)
         .length,
+      ...(responses.length > 0 ? { responses } : {}),
     };
   } catch (err) {
     // Never let a delivery problem bubble into the webhook response.
@@ -121,7 +125,8 @@ async function deliverOne(
   row: EndpointRow,
   event: WebhookEvent,
   payload: string,
-  tsSeconds: number
+  tsSeconds: number,
+  responses: unknown[] = []
 ): Promise<boolean> {
   // SSRF guard: refuse to POST to a host that resolves to a private /
   // loopback / link-local address. Counts as a failure so a
@@ -160,6 +165,19 @@ async function deliverOne(
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`endpoint responded ${res.status}`);
+
+    // Keep what the receiver answered when it is JSON (a receiver such as
+    // the CRM bridge returns the id it created). Best effort, size-capped.
+    try {
+      if (typeof res.text === 'function') {
+        const text = (await res.text()).slice(0, 65_536);
+        if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+          responses.push(JSON.parse(text));
+        }
+      }
+    } catch {
+      // not JSON or unreadable: nothing to keep
+    }
 
     // Success: clear the failure streak.
     await db

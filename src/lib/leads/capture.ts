@@ -13,6 +13,7 @@ import {
 } from './lookup'
 import { consentFromNotice } from './consent'
 import { reconcileWhatsApp } from './phone'
+import { zohoLeadIdFrom } from './zoho-id'
 import { reportLeadConversion } from './conversion'
 
 // ============================================================
@@ -266,9 +267,18 @@ export async function processIntake(
   // The request is in the CRM, so the conversation is done: close it. A
   // new message from the customer re-opens it.
   if (row.conversation_id) {
+    // Remember the CRM's id for this customer's lead: it is how the CRM
+    // later tells us about the lead (e.g. its sales rep) even when the
+    // customer has no visible phone number.
+    const zohoLeadId = zohoLeadIdFrom(result.responses)
     await db
       .from('conversations')
-      .update({ crm_match: null, status: 'closed', updated_at: new Date().toISOString() })
+      .update({
+        crm_match: null,
+        status: 'closed',
+        updated_at: new Date().toISOString(),
+        ...(zohoLeadId ? { zoho_lead_id: zohoLeadId } : {}),
+      })
       .eq('id', row.conversation_id)
   }
   const status = await finish('delivered', { error: null, delivered_at: new Date().toISOString() })

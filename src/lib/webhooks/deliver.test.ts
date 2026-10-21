@@ -160,6 +160,44 @@ describe('deliverWebhookEvent', () => {
     expect(result).toEqual({ endpoints: 2, delivered: 1 });
   });
 
+  it('hands back what an accepting endpoint answered, when it is JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '{"ok":true,"zoho_lead_id":"4634243000153062002"}',
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await deliverWebhookEvent(
+      makeDb([rows[0]], emptyCalls()),
+      'acct-1',
+      'lead.captured',
+      { x: 1 }
+    );
+    expect(result).toEqual({
+      endpoints: 1,
+      delivered: 1,
+      responses: [{ ok: true, zoho_lead_id: '4634243000153062002' }],
+    });
+  });
+
+  it('ignores an answer that is not JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => 'OK',
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await deliverWebhookEvent(
+      makeDb([rows[0]], emptyCalls()),
+      'acct-1',
+      'lead.captured',
+      { x: 1 }
+    );
+    expect(result).toEqual({ endpoints: 1, delivered: 1 });
+  });
+
   it('uses the caller-supplied event id as the envelope id', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response);
     vi.stubGlobal('fetch', fetchMock);

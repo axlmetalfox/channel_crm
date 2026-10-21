@@ -29,10 +29,16 @@ describe('parseAdvisorPayload', () => {
     })
   })
 
-  it('needs a usable number', () => {
+  it('needs a usable number or a lead id', () => {
     expect(parseAdvisorPayload({ AsesorAsignado: 'Ana' })).toBeNull()
     expect(parseAdvisorPayload({ Mobile: '123' })).toBeNull()
     expect(parseAdvisorPayload({})).toBeNull()
+    // customers with a hidden number are found by the lead id alone
+    expect(parseAdvisorPayload({ Lead_Id: '4634243000153062002', AsesorAsignado: 'Ana' })).toEqual({
+      mobile: '',
+      zohoLeadId: '4634243000153062002',
+      advisor: 'Ana',
+    })
   })
 })
 
@@ -53,18 +59,19 @@ describe('secretMatches', () => {
 describe('applyAdvisorAssigned', () => {
   const input = { mobile: '+573112580000', zohoLeadId: 'L1', advisor: 'Fernando Solis' }
 
-  function fakeDb(conversation: { id: string } | null, rpcError: Error | null = null) {
+  /** `answers` are what the successive conversation lookups return (lead id first, then by contact). */
+  function fakeDb(answers: ({ id: string } | null)[] | { id: string } | null, rpcError: Error | null = null) {
+    const queue = Array.isArray(answers) ? [...answers] : [answers]
     const rpc = vi.fn().mockResolvedValue({ error: rpcError })
     const chain: Record<string, unknown> = {}
     for (const m of ['select', 'eq', 'order', 'limit']) chain[m] = () => chain
-    chain.maybeSingle = () => Promise.resolve({ data: conversation })
+    chain.maybeSingle = () => Promise.resolve({ data: queue.length > 1 ? queue.shift() : queue[0] })
     return { db: { from: () => chain, rpc } as never, rpc }
   }
 
   beforeEach(() => h.findContact.mockReset())
 
-  it('records the rep on the contact\'s latest conversation', async () => {
-    h.findContact.mockResolvedValue({ id: 'ct-1', phone: '573112580000' })
+  it('finds the chat by the Zoho lead id first, without looking at the number', async () => {
     const { db, rpc } = fakeDb({ id: 'cv-9' })
     expect(await applyAdvisorAssigned(db, 'acct', input)).toEqual({ matched: true, conversationId: 'cv-9' })
     expect(rpc).toHaveBeenCalledWith('set_sales_rep', {
@@ -72,12 +79,32 @@ describe('applyAdvisorAssigned', () => {
       p_name: 'Fernando Solis',
       p_zoho_lead_id: 'L1',
     })
+    expect(h.findContact).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the number of the lead when no chat has that lead id yet', async () => {
+    h.findContact.mockResolvedValue({ id: 'ct-1', phone: '573112580000' })
+    const { db, rpc } = fakeDb([null, { id: 'cv-7' }])
+    expect(await applyAdvisorAssigned(db, 'acct', input)).toEqual({ matched: true, conversationId: 'cv-7' })
     expect(h.findContact).toHaveBeenCalledWith(expect.anything(), 'acct', '+573112580000')
+    expect(rpc).toHaveBeenCalledWith('set_sales_rep', expect.objectContaining({ p_conversation: 'cv-7', p_zoho_lead_id: 'L1' }))
+  })
+
+  it('a hidden-number customer is matched by the lead id alone', async () => {
+    const { db } = fakeDb({ id: 'cv-5' })
+    expect(await applyAdvisorAssigned(db, 'acct', { mobile: '', zohoLeadId: 'L9', advisor: 'Ana' })).toEqual({
+      matched: true,
+      conversationId: 'cv-5',
+    })
   })
 
   it('says so, without failing, when there is no such contact or conversation', async () => {
     h.findContact.mockResolvedValue(null)
     expect(await applyAdvisorAssigned(fakeDb(null).db, 'acct', input)).toEqual({ matched: false, reason: 'contact_not_found' })
+    expect(await applyAdvisorAssigned(fakeDb(null).db, 'acct', { mobile: '', zohoLeadId: 'L9', advisor: 'Ana' })).toEqual({
+      matched: false,
+      reason: 'contact_not_found',
+    })
     h.findContact.mockResolvedValue({ id: 'ct-1', phone: '5731' })
     const { db, rpc } = fakeDb(null)
     expect(await applyAdvisorAssigned(db, 'acct', input)).toEqual({ matched: false, reason: 'conversation_not_found' })
@@ -85,7 +112,6 @@ describe('applyAdvisorAssigned', () => {
   })
 
   it('throws when the database refuses the update', async () => {
-    h.findContact.mockResolvedValue({ id: 'ct-1', phone: '5731' })
     await expect(applyAdvisorAssigned(fakeDb({ id: 'cv-9' }, new Error('boom')).db, 'acct', input)).rejects.toThrow('boom')
   })
 })

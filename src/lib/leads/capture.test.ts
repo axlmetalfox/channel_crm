@@ -386,6 +386,16 @@ describe('captureLead', () => {
     expect(payload.whatsapp_reported).toBeNull()
   })
 
+  it('remembers the Zoho lead id the bridge answered with, on the conversation', async () => {
+    h.deliver.mockResolvedValue({ endpoints: 1, delivered: 1, responses: [{ ok: true, zoho_lead_id: '4634243000153062002' }] })
+    await captureLead({ db: fakeDb(), ...ARGS })
+    expect(
+      h.state.updates.some(
+        (u) => u.table === 'conversations' && u.values.status === 'closed' && u.values.zoho_lead_id === '4634243000153062002',
+      ),
+    ).toBe(true)
+  })
+
   it('marks a lead without a first name incomplete', async () => {
     h.extractLead.mockResolvedValue({
       lead: { ...LEAD, first_name: null },

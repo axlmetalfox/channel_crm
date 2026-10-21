@@ -14,7 +14,7 @@ import { findExistingContact } from '@/lib/contacts/dedupe'
 // ============================================================
 
 export interface AdvisorAssignedInput {
-  /** The lead's WhatsApp number as Zoho has it. */
+  /** The lead's WhatsApp number as Zoho has it ("" when only the lead id came). */
   mobile: string
   zohoLeadId: string | null
   /** The sales rep's display name, when Zoho sent one. */
@@ -74,11 +74,13 @@ export function parseAdvisorPayload(input: Record<string, unknown>): AdvisorAssi
 
   const mobile = textOf(pick('mobile', 'whatsapp', 'whatsappnumber', 'phone', 'telefono', 'movil'))
   const digits = (mobile ?? '').replace(/\D/g, '')
-  if (digits.length < 7) return null
+  const zohoLeadId = textOf(pick('leadid', 'zoholeadid', 'id', 'recordid'))
+  // Either the lead id or a usable number is needed to find the chat.
+  if (digits.length < 7 && !zohoLeadId) return null
 
   return {
-    mobile: mobile as string,
-    zohoLeadId: textOf(pick('leadid', 'zoholeadid', 'id', 'recordid')),
+    mobile: digits.length >= 7 ? (mobile as string) : '',
+    zohoLeadId,
     advisor: textOf(unwrap(pick('asesorasignado', 'advisor', 'asesor', 'owner', 'leadowner', 'propietario', 'propietariodelead'))),
   }
 }
@@ -105,19 +107,36 @@ export async function applyAdvisorAssigned(
   accountId: string,
   input: AdvisorAssignedInput,
 ): Promise<AdvisorAssignedOutcome> {
-  const contact = await findExistingContact(db, accountId, input.mobile)
-  if (!contact) return { matched: false, reason: 'contact_not_found' }
+  // 1) The Zoho lead id, saved when TUYO sent the lead: exact, and the only
+  //    way for customers whose WhatsApp number is hidden.
+  let conversationId: string | undefined
+  if (input.zohoLeadId) {
+    const { data } = await db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('zoho_lead_id', input.zohoLeadId)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
+    conversationId = (data as { id?: string } | null)?.id
+  }
 
-  const { data: conv } = await db
-    .from('conversations')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('contact_id', contact.id)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
-  const conversationId = (conv as { id?: string } | null)?.id
-  if (!conversationId) return { matched: false, reason: 'conversation_not_found' }
+  // 2) The lead's mobile, which is the number the customer wrote from.
+  if (!conversationId) {
+    const contact = await findExistingContact(db, accountId, input.mobile)
+    if (!contact) return { matched: false, reason: 'contact_not_found' }
+    const { data: conv } = await db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('contact_id', contact.id)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle()
+    conversationId = (conv as { id?: string } | null)?.id
+    if (!conversationId) return { matched: false, reason: 'conversation_not_found' }
+  }
 
   const { error } = await db.rpc('set_sales_rep', {
     p_conversation: conversationId,
