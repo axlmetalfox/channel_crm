@@ -56,16 +56,19 @@ function formatDuration(minutes: number): string {
  * Incoming conversations and how many ended in a registered lead (by the AI
  * agent or by a person), for a date range picked with the native calendar.
  *
- * Admins and the owner see the whole account. Agents only see their own
- * numbers (chats assigned to them and leads they sent); viewers see nothing.
+ * Admins, the owner and observers (viewers, read-only) see the whole account.
+ * Agents only see their own numbers (chats assigned to them and leads they
+ * sent).
  */
 export function ConversionSummaryPanel() {
   const t = useTranslations('Dashboard.conversion')
   const { user, accountRole, profileLoading } = useAuth()
-  const isAdmin = !!accountRole && canEditSettings(accountRole)
+  // Who sees the whole account: admins and the owner, and the observer, whose
+  // role reads everything but changes nothing.
+  const isAdmin = !!accountRole && (canEditSettings(accountRole) || accountRole === 'viewer')
   const isAgent = !!accountRole && hasMinRole(accountRole, 'agent')
   const userId = user?.id ?? null
-  const ready = !profileLoading && isAgent && !!userId
+  const ready = !profileLoading && (isAgent || isAdmin) && !!userId
 
   const [initialRange] = useState(() => presetRange('7'))
   const [range, setRange] = useState(initialRange)
@@ -118,8 +121,8 @@ export function ConversionSummaryPanel() {
   const percent = (rate: number) => `${formatNumber(rate * 100, 1)}%`
   const today = localDayKey(new Date())
 
-  // Viewers have no numbers of their own; nothing to show until the role is known.
-  if (profileLoading || !isAgent) return null
+  // Nothing to show until the role is known.
+  if (profileLoading || !(isAgent || isAdmin)) return null
 
   return (
     <section className="rounded-xl border border-border bg-card">
