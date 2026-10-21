@@ -85,6 +85,21 @@ export function parseAdvisorPayload(input: Record<string, unknown>): AdvisorAssi
   }
 }
 
+/**
+ * The secret Zoho presented: the `x-tuyo-secret` header, or, when Zoho put it
+ * among the form fields instead, a field with that name (or `secret`). Over
+ * TLS both are equally private; the query string is NOT accepted (it ends up
+ * in access logs).
+ */
+export function providedSecret(header: string | null | undefined, input: Record<string, unknown>): string | null {
+  if (header && header.trim()) return header.trim()
+  for (const [k, v] of Object.entries(input)) {
+    const key = keyOf(k)
+    if ((key === 'xtuyosecret' || key === 'secret') && typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return null
+}
+
 /** Constant-time comparison of the shared secret. */
 export function secretMatches(provided: string | null | undefined, expected: string | null | undefined): boolean {
   if (!provided || !expected) return false

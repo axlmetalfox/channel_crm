@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const h = vi.hoisted(() => ({ findContact: vi.fn() }))
 vi.mock('@/lib/contacts/dedupe', () => ({ findExistingContact: h.findContact }))
 
-import { applyAdvisorAssigned, parseAdvisorPayload, secretMatches } from './zoho-advisor'
+import { applyAdvisorAssigned, parseAdvisorPayload, providedSecret, secretMatches } from './zoho-advisor'
 
 describe('parseAdvisorPayload', () => {
   it('reads the fields whatever their case or spacing', () => {
@@ -39,6 +39,19 @@ describe('parseAdvisorPayload', () => {
       zohoLeadId: '4634243000153062002',
       advisor: 'Ana',
     })
+  })
+})
+
+describe('providedSecret', () => {
+  it('takes the header, or the same name among the form fields when Zoho put it there', () => {
+    expect(providedSecret(' abc ', {})).toBe('abc')
+    expect(providedSecret(null, { 'x-tuyo-secret': 'abc' })).toBe('abc')
+    expect(providedSecret('', { Secret: 'abc' })).toBe('abc')
+    expect(providedSecret(null, { Mobile: '1' })).toBeNull()
+  })
+
+  it('prefers the header', () => {
+    expect(providedSecret('from-header', { 'x-tuyo-secret': 'from-body' })).toBe('from-header')
   })
 })
 
