@@ -13,32 +13,11 @@ import {
 } from '@/lib/dashboard/conversion'
 import { useAuth } from '@/hooks/use-auth'
 import { canEditSettings, hasMinRole } from '@/lib/auth/roles'
-import { daysAgoStart, localDayKey } from '@/lib/dashboard/date-utils'
+import { localDayKey } from '@/lib/dashboard/date-utils'
+import { PRESETS, presetRange } from '@/lib/dashboard/date-range'
 import { cn } from '@/lib/utils'
 import { MetricCard } from './metric-card'
 import { Skeleton } from './skeleton'
-
-type Preset = 'today' | 'yesterday' | '7' | '30' | 'month'
-
-function presetRange(preset: Preset): { from: string; to: string } {
-  const today = localDayKey(new Date())
-  switch (preset) {
-    case 'today':
-      return { from: today, to: today }
-    case 'yesterday': {
-      const y = localDayKey(daysAgoStart(1))
-      return { from: y, to: y }
-    }
-    case '7':
-      return { from: localDayKey(daysAgoStart(6)), to: today }
-    case '30':
-      return { from: localDayKey(daysAgoStart(29)), to: today }
-    case 'month':
-      return { from: `${today.slice(0, 8)}01`, to: today }
-  }
-}
-
-const PRESETS: Preset[] = ['today', 'yesterday', '7', '30', 'month']
 
 /** 45 -> "45 min", 135 -> "2 h 15 min", 1700 -> "1 d 4 h". */
 function formatDuration(minutes: number): string {

@@ -35,6 +35,7 @@ import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { ConversionSummaryPanel } from '@/components/dashboard/conversion-summary'
+import { AttributionSourcesPanel } from '@/components/dashboard/attribution-sources'
 
 import { useTranslations } from 'next-intl'
 
@@ -192,6 +193,9 @@ export default function DashboardPage() {
 
       {/* Incoming conversations vs. registered leads, for a chosen date range */}
       <ConversionSummaryPanel />
+
+      {/* Where the conversations come from (Meta ads and posts): conversations, leads sent to the CRM, conversion */}
+      <AttributionSourcesPanel />
 
       {/* Quick actions */}
       <QuickActions />
