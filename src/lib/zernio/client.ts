@@ -305,6 +305,36 @@ export async function startZernioConversation(args: {
   return { messageId, conversationId }
 }
 
+export interface WhatsAppNumberStatus {
+  /** Meta's connection status of the number, e.g. CONNECTED / DISCONNECTED. */
+  phoneStatus: string | null
+  platformType: string | null
+  quality: string | null
+  tier: string | null
+  displayPhone: string | null
+}
+
+/** Live status of the connected WhatsApp number, straight from Meta (read-only). */
+export async function getWhatsAppNumberStatus(args: {
+  apiKey: string
+  accountId: string
+}): Promise<WhatsAppNumberStatus> {
+  const res = await zernioRequest<{ phone?: Record<string, unknown> }>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/whatsapp/number-info?accountId=${encodeURIComponent(args.accountId)}`,
+  })
+  const p = res.phone ?? {}
+  const str = (v: unknown) => (typeof v === 'string' ? v : null)
+  return {
+    phoneStatus: str(p.status),
+    platformType: str(p.platform_type),
+    quality: str(p.quality_rating),
+    tier: str(p.messaging_limit_tier),
+    displayPhone: str(p.display_phone_number),
+  }
+}
+
 export interface ZernioAccountHealth {
   accountId: string
   platform: string | null

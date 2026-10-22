@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { runAutoAssign, runScheduledAssign } from '@/lib/conversations/auto-assign'
 import { runRecoveryNudges } from '@/lib/conversations/recovery'
 import { runZernioTemplateSync } from '@/lib/zernio/template-sweep'
+import { runChannelHealthCheck } from '@/lib/zernio/health'
 
 const DEFAULT_PENDING_MINUTES = 30
 
@@ -17,7 +18,9 @@ const DEFAULT_PENDING_MINUTES = 30
  *   - run the one-time scheduled hand-out when its time has come;
  *   - refresh the WhatsApp template catalog from Meta (through Zernio);
  *   - send the recovery message to customers who went quiet, for accounts
- *     that wrote one (Agents > Setup).
+ *     that wrote one (Agents > Setup);
+ *   - read the live status of each WhatsApp number: `channel_alerts` lists
+ *     numbers newly confirmed down ("down") or back ("restored").
  *
  * Auth: the shared `AUTOMATION_CRON_SECRET`, same as the other cron routes.
  */
@@ -51,7 +54,9 @@ export async function GET(request: Request) {
   const { assigned } = await runAutoAssign(supabaseAdmin())
   const { sent } = await runRecoveryNudges(supabaseAdmin())
   await runZernioTemplateSync(supabaseAdmin())
+  const channel = await runChannelHealthCheck(supabaseAdmin())
   return NextResponse.json({
+    channel_alerts: channel.alerts,
     marked_pending: data ?? 0,
     after_minutes: minutes,
     auto_assigned: assigned,

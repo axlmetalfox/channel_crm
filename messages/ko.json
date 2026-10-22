@@ -2273,6 +2273,13 @@
     "createDeals": "딜을 만들",
     "sendMessages": "메시지를 보낼"
   },
+  "ChannelStatus": {
+    "title": "WhatsApp 연결이 끊어졌습니다",
+    "body": "고객 메시지가 들어오지 않고 전송이 실패하고 있습니다.",
+    "bodySince": "{since}(보고타 시간)부터 고객 메시지가 들어오지 않고 전송이 실패하고 있습니다.",
+    "agentHint": "다시 보내지 말고 관리자에게 알리세요. 복구되면 다시 보내세요.",
+    "adminHint": "Meta/Zernio에서 번호를 확인하세요. Meta가 재인증을 요구하면 SMS 코드를 요청하고 번호를 다시 등록해야 합니다."
+  },
   "Common": {
     "loading": "불러오는 중..."
   }
