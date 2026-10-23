@@ -305,6 +305,228 @@ export async function startZernioConversation(args: {
   return { messageId, conversationId }
 }
 
+// ---- Advertising connections (read, and start a connection) ----------------
+
+/** One connection (account) the API key manages: WhatsApp, Meta Ads, ... */
+export interface ZernioConnection {
+  id: string
+  platform: string
+  username: string | null
+  displayName: string | null
+  profileId: string | null
+  enabled: boolean
+  isActive: boolean
+  needsReconnection: boolean
+  createdAt: string | null
+  parentAccountId: string | null
+}
+
+export async function listZernioConnections(apiKey: string): Promise<ZernioConnection[]> {
+  const res = await zernioRequest<{ accounts?: Record<string, unknown>[] }>({
+    apiKey,
+    method: 'GET',
+    path: '/accounts',
+  })
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  return (res.accounts ?? []).map((a) => {
+    const profile = a.profileId as { _id?: unknown } | string | null | undefined
+    return {
+      id: String(a._id ?? a.id ?? ''),
+      platform: String(a.platform ?? ''),
+      username: str(a.username),
+      displayName: str(a.displayName),
+      profileId: typeof profile === 'string' ? profile : str(profile?._id),
+      enabled: a.enabled !== false,
+      isActive: a.isActive !== false,
+      needsReconnection: a.needsReconnection === true,
+      createdAt: str(a.createdAt),
+      parentAccountId: str(a.parentAccountId),
+    }
+  })
+}
+
+export interface ZernioAdAccount {
+  id: string
+  name: string
+  currency: string | null
+  businessName: string | null
+  timezoneName: string | null
+  /** Meta's account status: 1 = active. */
+  accountStatus: number | null
+  billingStatus: string | null
+  selectable: boolean
+  selected: boolean
+  unusableReason: string | null
+}
+
+/** The ad accounts a connection can reach. */
+export async function listZernioAdAccounts(args: { apiKey: string; accountId: string }): Promise<ZernioAdAccount[]> {
+  const res = await zernioRequest<{ accounts?: Record<string, unknown>[] }>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/ads/accounts?accountId=${encodeURIComponent(args.accountId)}`,
+  })
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  return (res.accounts ?? []).map((a) => ({
+    id: String(a.id ?? ''),
+    name: String(a.name ?? a.id ?? ''),
+    currency: str(a.currency),
+    businessName: str(a.businessName),
+    timezoneName: str(a.timezoneName),
+    accountStatus: typeof a.accountStatus === 'number' ? a.accountStatus : null,
+    billingStatus: str(a.billingStatus),
+    selectable: a.selectable !== false,
+    selected: a.selected !== false,
+    unusableReason: str(a.unusableReason),
+  }))
+}
+
+/** How many ads the connection has synced (a count, no data). */
+export async function countZernioAds(args: { apiKey: string; accountId: string }): Promise<number> {
+  const res = await zernioRequest<{ pagination?: { total?: number } }>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/ads?accountId=${encodeURIComponent(args.accountId)}&limit=1`,
+  })
+  return typeof res.pagination?.total === 'number' ? res.pagination.total : 0
+}
+
+/**
+ * Start the Meta Ads connection: returns the address the person must open to
+ * sign in to Meta and approve. When done, the browser lands on `redirectUrl`.
+ */
+export async function startMetaAdsConnect(args: {
+  apiKey: string
+  profileId: string
+  redirectUrl: string
+}): Promise<{ authUrl: string }> {
+  const query = new URLSearchParams({
+    profileId: args.profileId,
+    redirect_url: args.redirectUrl,
+    loginMode: 'business',
+  })
+  const res = await zernioRequest<{ authUrl?: string }>({
+    apiKey: args.apiKey,
+    method: 'GET',
+    path: `/connect/facebook/ads?${query.toString()}`,
+  })
+  if (!res.authUrl) throw new ZernioError('The connection did not return an address to continue.', 502)
+  return { authUrl: res.authUrl }
+}
+
+/** One ad of the connected ad account, with the names of its campaign and ad set. */
+export interface ZernioAd {
+  platformAdId: string
+  name: string | null
+  campaignId: string | null
+  campaignName: string | null
+  adSetId: string | null
+  adSetName: string | null
+  status: string | null
+  currency: string | null
+}
+
+/** Every ad of a connection (paged 100 at a time). */
+export async function listZernioAds(args: { apiKey: string; accountId: string }): Promise<ZernioAd[]> {
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  const out: ZernioAd[] = []
+  for (let page = 1; page <= 50; page++) {
+    const res = await zernioRequest<{ ads?: Record<string, unknown>[]; pagination?: { pages?: number } }>({
+      apiKey: args.apiKey,
+      method: 'GET',
+      path: `/ads?accountId=${encodeURIComponent(args.accountId)}&limit=100&page=${page}`,
+    })
+    for (const a of res.ads ?? []) {
+      const id = str(a.platformAdId)
+      if (!id) continue
+      out.push({
+        platformAdId: id,
+        name: str(a.name),
+        campaignId: str(a.platformCampaignId),
+        campaignName: str(a.campaignName),
+        adSetId: str(a.platformAdSetId),
+        adSetName: str(a.adSetName),
+        status: str(a.status),
+        currency: str(a.currency),
+      })
+    }
+    if (page >= (res.pagination?.pages ?? 1)) break
+  }
+  return out
+}
+
+/** One ad on one day, as the ad platform reports it. */
+export interface ZernioAdDay {
+  platformAdId: string
+  day: string
+  spend: number
+  impressions: number
+  clicks: number
+  /** Conversations (WhatsApp / Messenger) the platform says were started. */
+  conversationsStarted: number
+}
+
+const CONVERSATION_ACTION = 'onsite_conversion.messaging_conversation_started_7d'
+
+/** Parse one row of the platform's insights response; null when it has no ad or day. */
+export function parseAdInsightRow(row: Record<string, unknown>): ZernioAdDay | null {
+  const num = (v: unknown) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  const id = typeof row.ad_id === 'string' ? row.ad_id : null
+  const day = typeof row.date_start === 'string' ? row.date_start : null
+  if (!id || !day) return null
+  const actions = Array.isArray(row.actions) ? (row.actions as { action_type?: string; value?: unknown }[]) : []
+  const started = actions.find((a) => a.action_type === CONVERSATION_ACTION)
+  return {
+    platformAdId: id,
+    day,
+    spend: num(row.spend),
+    impressions: num(row.impressions),
+    clicks: num(row.clicks),
+    conversationsStarted: started ? num(started.value) : 0,
+  }
+}
+
+/** Daily spend / reach / conversations per ad for a date range (YYYY-MM-DD). */
+export async function listZernioAdDays(args: {
+  apiKey: string
+  accountId: string
+  /** The ad account, `act_<number>`. */
+  adAccountId: string
+  from: string
+  to: string
+}): Promise<ZernioAdDay[]> {
+  const out: ZernioAdDay[] = []
+  let after: string | null = null
+  for (let page = 0; page < 40; page++) {
+    const query = new URLSearchParams({
+      accountId: args.accountId,
+      objectId: args.adAccountId,
+      level: 'ad',
+      fields: 'ad_id,spend,impressions,clicks,actions',
+      timeIncrement: '1',
+      fromDate: args.from,
+      toDate: args.to,
+      limit: '500',
+    })
+    if (after) query.set('after', after)
+    const res: { data?: Record<string, unknown>[]; paging?: { after?: string | null } } = await zernioRequest({
+      apiKey: args.apiKey,
+      method: 'GET',
+      path: `/ads/insights?${query.toString()}`,
+    })
+    for (const row of res.data ?? []) {
+      const parsed = parseAdInsightRow(row)
+      if (parsed) out.push(parsed)
+    }
+    after = res.paging?.after ?? null
+    if (!after) break
+  }
+  return out
+}
+
 export interface WhatsAppNumberStatus {
   /** Meta's connection status of the number, e.g. CONNECTED / DISCONNECTED. */
   phoneStatus: string | null

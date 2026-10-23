@@ -6,7 +6,7 @@ import { ExternalLink, Image as ImageIcon, Megaphone, Newspaper, Route, Video } 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { canEditSettings } from "@/lib/auth/roles";
-import { formatNumber } from "@/lib/currency";
+import { formatCurrency, formatNumber } from "@/lib/currency";
 import { localDayKey } from "@/lib/dashboard/date-utils";
 import { PRESETS, presetRange } from "@/lib/dashboard/date-range";
 import {
@@ -14,11 +14,12 @@ import {
   loadAttributionSummary,
   type AttributionSource,
   type AttributionSummary,
+  type CampaignSummary,
 } from "@/lib/dashboard/attribution";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "./skeleton";
 
-type View = "ad" | "creative";
+type View = "ad" | "creative" | "campaign";
 
 /**
  * "Fuentes de Atribución": every Meta ad or post that started a conversation,
@@ -76,6 +77,8 @@ export function AttributionSourcesPanel() {
   }, [data, view]);
 
   const percent = (rate: number) => `${formatNumber(rate * 100, 1)}%`;
+  const perf = data?.performance ?? null;
+  const money = (value: number) => formatCurrency(value, perf?.currency ?? "COP");
   const today = localDayKey(new Date());
 
   if (profileLoading || !canSee) return null;
@@ -151,11 +154,27 @@ export function AttributionSourcesPanel() {
               <Total label={t("leadsToZoho")} value={formatNumber(data.attributed.leads)} hint={t("ofMeta")} />
               <Total label={t("rate")} value={percent(data.attributed.rate)} hint={t("ofMeta")} />
             </dl>
+            {perf && (
+              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Total label={t("spend")} value={money(perf.spend)} hint={t("spendHint")} />
+                <Total
+                  label={t("costPerConversation")}
+                  value={perf.costPerConversation === null ? "—" : money(perf.costPerConversation)}
+                  hint={t("ofAds")}
+                />
+                <Total
+                  label={t("costPerLead")}
+                  value={perf.costPerLead === null ? "—" : money(perf.costPerLead)}
+                  hint={t("ofAds")}
+                />
+                <Total label={t("idleSpend")} value={money(perf.idleSpend)} hint={t("idleSpendHint")} />
+              </dl>
+            )}
 
             {/* View switch */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1 rounded-lg bg-muted/60 p-1">
-                {(["ad", "creative"] as const).map((v) => (
+                {((perf ? ["campaign", "ad", "creative"] : ["ad", "creative"]) as View[]).map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -169,18 +188,27 @@ export function AttributionSourcesPanel() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground">{t("campaignNote")}</p>
+              <p className="text-[11px] text-muted-foreground">{perf ? t("syncedNote") : t("campaignNote")}</p>
             </div>
 
-            {cards.length === 0 && !data.direct ? (
+            {view === "campaign" && perf ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {perf.campaigns.map((c) => (
+                  <CampaignCard key={c.key} campaign={c} maxSpend={perf.campaigns[0]?.spend ?? 1} t={t} percent={percent} money={money} />
+                ))}
+                {data.direct && (
+                  <SourceCard source={data.direct} maxConversations={data.direct.conversations} t={t} percent={percent} money={money} />
+                )}
+              </div>
+            ) : cards.length === 0 && !data.direct ? (
               <p className="py-6 text-center text-sm text-muted-foreground">{t("empty")}</p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {cards.map((s) => (
-                  <SourceCard key={s.key} source={s} maxConversations={cards[0]?.conversations ?? 1} t={t} percent={percent} />
+                  <SourceCard key={s.key} source={s} maxConversations={cards[0]?.conversations ?? 1} t={t} percent={percent} money={money} />
                 ))}
                 {data.direct && (
-                  <SourceCard source={data.direct} maxConversations={cards[0]?.conversations ?? data.direct.conversations} t={t} percent={percent} />
+                  <SourceCard source={data.direct} maxConversations={cards[0]?.conversations ?? data.direct.conversations} t={t} percent={percent} money={money} />
                 )}
               </div>
             )}
@@ -206,11 +234,13 @@ function SourceCard({
   maxConversations,
   t,
   percent,
+  money,
 }: {
   source: AttributionSource;
   maxConversations: number;
   t: ReturnType<typeof useTranslations>;
   percent: (rate: number) => string;
+  money: (value: number) => string;
 }) {
   const Icon = source.kind === "post" ? Newspaper : source.kind === "direct" ? Route : Megaphone;
   const MediaIcon = source.mediaType === "video" ? Video : ImageIcon;
@@ -255,6 +285,12 @@ function SourceCard({
         <h3 className="line-clamp-2 text-sm font-medium text-foreground" title={title}>
           {title}
         </h3>
+        {source.campaignName && (
+          <p className="mt-0.5 truncate text-[11px] text-foreground/80" title={source.campaignName}>
+            {t("campaignLabel")}: {source.campaignName}
+            {source.adSetName ? ` · ${source.adSetName}` : ""}
+          </p>
+        )}
         {source.sourceIds.length > 0 && (
           <p className="mt-0.5 truncate text-[10px] text-muted-foreground" title={source.sourceIds.join(", ")}>
             {source.sourceIds.length > 1 ? t("adsCount", { count: source.sourceIds.length }) : `ID ${source.sourceIds[0]}`}
@@ -280,6 +316,107 @@ function SourceCard({
           <dt className="text-[10px] text-muted-foreground">{t("conversion")}</dt>
         </div>
       </dl>
+
+      {source.spend !== null && (
+        <dl className="grid grid-cols-3 gap-2 border-t border-border pt-2 text-center">
+          <Money label={t("spend")} value={money(source.spend)} />
+          <Money
+            label={t("perConversation")}
+            value={source.conversations > 0 ? money(source.spend / source.conversations) : "—"}
+          />
+          <Money label={t("perLead")} value={source.leads > 0 ? money(source.spend / source.leads) : "—"} />
+        </dl>
+      )}
+    </article>
+  );
+}
+
+function Money({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dd className="text-sm font-medium tabular-nums text-foreground">{value}</dd>
+      <dt className="text-[10px] text-muted-foreground">{label}</dt>
+    </div>
+  );
+}
+
+function CampaignCard({
+  campaign,
+  maxSpend,
+  t,
+  percent,
+  money,
+}: {
+  campaign: CampaignSummary;
+  maxSpend: number;
+  t: ReturnType<typeof useTranslations>;
+  percent: (rate: number) => string;
+  money: (value: number) => string;
+}) {
+  const title =
+    campaign.kind === "organic"
+      ? t("organicCampaign")
+      : campaign.kind === "unknown"
+        ? t("unknownCampaign")
+        : campaign.name || t("noHeadline", { id: campaign.key });
+  const share = maxSpend > 0 ? Math.max(3, Math.round((campaign.spend / maxSpend) * 100)) : 0;
+  const active = campaign.status === "active";
+
+  return (
+    <article className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
+      <div className="flex items-start justify-between gap-2">
+        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+          <Megaphone className="h-3 w-3" />
+          {t("kind_campaign")}
+        </span>
+        {campaign.kind === "campaign" && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium",
+              active ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {active ? t("statusActive") : t("statusInactive")}
+          </span>
+        )}
+      </div>
+
+      <div className="min-h-10">
+        <h3 className="line-clamp-2 text-sm font-medium text-foreground" title={title}>
+          {title}
+        </h3>
+        <p className="mt-0.5 text-[10px] text-muted-foreground">{t("adsInCampaign", { count: campaign.ads })}</p>
+      </div>
+
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary/70" style={{ width: `${share}%` }} />
+      </div>
+
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        <div>
+          <dd className="text-lg font-semibold tabular-nums text-foreground">{formatNumber(campaign.conversations)}</dd>
+          <dt className="text-[10px] text-muted-foreground">{t("conversations")}</dt>
+        </div>
+        <div>
+          <dd className="text-lg font-semibold tabular-nums text-foreground">{formatNumber(campaign.leads)}</dd>
+          <dt className="text-[10px] text-muted-foreground">{t("leads")}</dt>
+        </div>
+        <div>
+          <dd className="text-lg font-semibold tabular-nums text-primary">{percent(campaign.rate)}</dd>
+          <dt className="text-[10px] text-muted-foreground">{t("conversion")}</dt>
+        </div>
+      </dl>
+
+      {campaign.kind !== "organic" && (
+        <dl className="grid grid-cols-3 gap-2 border-t border-border pt-2 text-center">
+          <Money label={t("spend")} value={money(campaign.spend)} />
+          <Money
+            label={t("perConversation")}
+            value={campaign.costPerConversation === null ? "—" : money(campaign.costPerConversation)}
+          />
+          <Money label={t("perLead")} value={campaign.costPerLead === null ? "—" : money(campaign.costPerLead)} />
+        </dl>
+      )}
     </article>
   );
 }

@@ -5,6 +5,7 @@ import { runAutoAssign, runScheduledAssign } from '@/lib/conversations/auto-assi
 import { runRecoveryNudges } from '@/lib/conversations/recovery'
 import { runZernioTemplateSync } from '@/lib/zernio/template-sweep'
 import { runChannelHealthCheck } from '@/lib/zernio/health'
+import { runAdSyncIfDue } from '@/lib/ad-platforms/sync'
 
 const DEFAULT_PENDING_MINUTES = 30
 
@@ -55,7 +56,9 @@ export async function GET(request: Request) {
   const { sent } = await runRecoveryNudges(supabaseAdmin())
   await runZernioTemplateSync(supabaseAdmin())
   const channel = await runChannelHealthCheck(supabaseAdmin())
+  const ads = await runAdSyncIfDue(supabaseAdmin())
   return NextResponse.json({
+    ad_syncs: ads.synced,
     channel_alerts: channel.alerts,
     marked_pending: data ?? 0,
     after_minutes: minutes,

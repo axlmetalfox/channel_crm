@@ -37,11 +37,67 @@ export interface AttributionSource {
   leads: number
   /** leads / conversations (0 when there are none). */
   rate: number
+  /** What the ad cost in the range, once the ad account is connected and synced. */
+  spend: number | null
+  campaignName: string | null
+  adSetName: string | null
+  /** Delivery status reported by the ad platform (active, paused...). */
+  adStatus: string | null
+}
+
+/** One row of the SQL function ad_performance_summary(). */
+export interface AdPerformanceRow {
+  platform_ad_id: string
+  ad_name: string | null
+  campaign_id: string | null
+  campaign_name: string | null
+  adset_name: string | null
+  status: string | null
+  currency: string | null
+  spend: number | string
+  impressions: number | string
+  clicks: number | string
+  meta_conversations: number | string
+}
+
+export type CampaignKind = 'campaign' | 'unknown' | 'organic'
+
+/** An ad campaign with the chats it brought and what it cost. */
+export interface CampaignSummary {
+  key: string
+  kind: CampaignKind
+  name: string | null
+  /** Ads of the campaign that spent or brought chats in the range. */
+  ads: number
+  conversations: number
+  leads: number
+  rate: number
+  spend: number
+  /** Conversations the ad platform says it started (its own count). */
+  platformConversations: number
+  costPerConversation: number | null
+  costPerLead: number | null
+  status: string | null
+}
+
+export interface PerformanceSummary {
+  spend: number
+  /** ISO currency of the ad account (COP). */
+  currency: string
+  /** spend / conversations that came from ads. */
+  costPerConversation: number | null
+  /** spend / leads sent from ad conversations. */
+  costPerLead: number | null
+  campaigns: CampaignSummary[]
+  /** Spend of ads that brought no conversation in the range. */
+  idleSpend: number
 }
 
 export interface AttributionSummary {
   /** Meta ads and posts, biggest first. */
   sources: AttributionSource[]
+  /** Ad spend and campaigns; null while the ad account is not synced. */
+  performance?: PerformanceSummary | null
   /** Conversations with no referral. */
   direct: AttributionSource | null
   attributed: { conversations: number; leads: number; rate: number }
@@ -74,6 +130,10 @@ export function summarizeAttribution(rows: AttributionRow[]): AttributionSummary
       conversations,
       leads,
       rate: rateOf(leads, conversations),
+      spend: null,
+      campaignName: null,
+      adSetName: null,
+      adStatus: null,
     }
     if (kind === 'direct') directRows.push(source)
     else sources.push(source)
@@ -124,8 +184,128 @@ export function groupByCreative(sources: AttributionSource[]): AttributionSource
     g.leads += s.leads
     g.rate = rateOf(g.leads, g.conversations)
     g.url = g.url ?? s.url
+    g.spend = g.spend === null && s.spend === null ? null : (g.spend ?? 0) + (s.spend ?? 0)
+    if (g.campaignName !== s.campaignName) g.campaignName = null
+    if (g.adSetName !== s.adSetName) g.adSetName = null
   }
   return [...groups.values()].sort((a, b) => b.conversations - a.conversations || b.leads - a.leads)
+}
+
+function ratio(numerator: number, denominator: number): number | null {
+  return denominator > 0 ? numerator / denominator : null
+}
+
+/**
+ * Add what the ads cost to the attribution: the campaign and ad set of every
+ * ad, its spend, and a per-campaign roll-up with cost per conversation and per
+ * lead. `perf` is empty until the ad account is connected and synced, and then
+ * the summary is returned untouched.
+ */
+export function withAdPerformance(summary: AttributionSummary, perf: AdPerformanceRow[]): AttributionSummary {
+  if (perf.length === 0) return { ...summary, performance: null }
+
+  const byId = new Map(perf.map((p) => [p.platform_ad_id, p]))
+  const sources = summary.sources.map((s) => {
+    const row = s.sourceIds.length === 1 ? byId.get(s.sourceIds[0]) : undefined
+    if (!row) return s
+    return {
+      ...s,
+      spend: Number(row.spend),
+      campaignName: row.campaign_name,
+      adSetName: row.adset_name,
+      adStatus: row.status,
+    }
+  })
+
+  interface Bucket extends CampaignSummary {
+    adIds: Set<string>
+  }
+  const buckets = new Map<string, Bucket>()
+  const bucket = (key: string, kind: CampaignKind, name: string | null): Bucket => {
+    let b = buckets.get(key)
+    if (!b) {
+      b = {
+        key, kind, name, ads: 0, conversations: 0, leads: 0, rate: 0, spend: 0,
+        platformConversations: 0, costPerConversation: null, costPerLead: null, status: null,
+        adIds: new Set(),
+      }
+      buckets.set(key, b)
+    }
+    return b
+  }
+
+  const chatIds = new Set<string>()
+  for (const s of sources) {
+    if (s.kind === 'ad' || s.kind === 'post') for (const id of s.sourceIds) chatIds.add(id)
+  }
+  // Ads of the account: the campaign collects their spend and the platform's own count.
+  for (const row of perf) {
+    const spend = Number(row.spend)
+    const hasChats = chatIds.has(row.platform_ad_id)
+    if (spend <= 0 && !hasChats) continue
+    const b = row.campaign_id
+      ? bucket(row.campaign_id, 'campaign', row.campaign_name)
+      : bucket('unknown', 'unknown', null)
+    b.spend += spend
+    b.platformConversations += Number(row.meta_conversations)
+    b.adIds.add(row.platform_ad_id)
+    // A campaign is active when any of its ads is.
+    if (b.status !== 'active') b.status = row.status ?? b.status
+  }
+  // Chats go to the campaign of their ad; posts and unknown ads have their own groups.
+  for (const s of sources) {
+    if (s.kind === 'direct') continue
+    const row = s.sourceIds.length === 1 ? byId.get(s.sourceIds[0]) : undefined
+    const b =
+      s.kind === 'post'
+        ? bucket('organic', 'organic', null)
+        : row?.campaign_id
+          ? bucket(row.campaign_id, 'campaign', row.campaign_name)
+          : bucket('unknown', 'unknown', null)
+    b.conversations += s.conversations
+    b.leads += s.leads
+    for (const id of s.sourceIds) b.adIds.add(id)
+  }
+
+  const campaigns = [...buckets.values()].map(({ adIds, ...c }) => ({
+    ...c,
+    ads: adIds.size,
+    rate: rateOf(c.leads, c.conversations),
+    costPerConversation: ratio(c.spend, c.conversations),
+    costPerLead: ratio(c.spend, c.leads),
+  }))
+  campaigns.sort((a, b) => b.spend - a.spend || b.conversations - a.conversations)
+
+  const adSources = sources.filter((s) => s.kind === 'ad')
+  const adConversations = adSources.reduce((n, s) => n + s.conversations, 0)
+  const adLeads = adSources.reduce((n, s) => n + s.leads, 0)
+  const spend = perf.reduce((n, p) => n + Number(p.spend), 0)
+  const idleSpend = perf
+    .filter((p) => !chatIds.has(p.platform_ad_id))
+    .reduce((n, p) => n + Number(p.spend), 0)
+
+  return {
+    ...summary,
+    sources,
+    performance: {
+      spend,
+      currency: perf.find((p) => p.currency)?.currency ?? 'COP',
+      costPerConversation: ratio(spend, adConversations),
+      costPerLead: ratio(spend, adLeads),
+      campaigns,
+      idleSpend,
+    },
+  }
+}
+
+/** The ads of the connected ad account with what they spent in the range. Empty when not synced. */
+export async function loadAdPerformance(db: SupabaseClient, from: string, to: string): Promise<AdPerformanceRow[]> {
+  const { data, error } = await db.rpc('ad_performance_summary', { p_from: from, p_to: to })
+  if (error) {
+    console.warn('[dashboard] ad performance unavailable:', error.message)
+    return []
+  }
+  return (data ?? []) as AdPerformanceRow[]
 }
 
 /**
@@ -141,10 +321,10 @@ export async function loadAttributionSummary(
   const start = new Date(`${from}T00:00:00`)
   const end = new Date(`${to}T00:00:00`)
   end.setDate(end.getDate() + 1)
-  const { data, error } = await db.rpc('attribution_summary', {
-    p_from: start.toISOString(),
-    p_to: end.toISOString(),
-  })
+  const [{ data, error }, perf] = await Promise.all([
+    db.rpc('attribution_summary', { p_from: start.toISOString(), p_to: end.toISOString() }),
+    loadAdPerformance(db, from, to),
+  ])
   if (error) throw error
-  return summarizeAttribution((data ?? []) as AttributionRow[])
+  return withAdPerformance(summarizeAttribution((data ?? []) as AttributionRow[]), perf)
 }
