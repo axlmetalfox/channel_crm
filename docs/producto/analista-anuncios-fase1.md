@@ -191,3 +191,28 @@ Ajustes que salieron de correrlo con los datos reales de Intertec:
 5. **D7 (brecha de medición) se reformuló.** Meta cuenta las conversaciones con ventana de atribución de 7 días (incluye quien vio el anuncio sin hacer clic), así que siempre cuenta más que TUYO. La alerta importa cuando la diferencia es enorme: en Intertec, la campaña de remarketing (Meta 169 vs TUYO 33) y una campaña "Clientes potenciales" (Meta 26 vs TUYO 0). El dinero en juego es gasto × diferencia. La severidad nunca pasa de "media" porque es una alerta de medición, no una prueba.
 6. **Hallazgo real:** un anuncio ("Te asesoramos ya") costó $ 77.830 por lead frente a $ 15.415 de la cuenta y concentró el 41 % del gasto, ya pausado.
 
+## 15. Resultados del paso 2 (2026-10-23): analista, validador y prueba de modelos
+
+Código: `analyst.ts` (prompt, esquema, validador, plantilla, ejecución con un reintento), `numbers.ts` (comprobación de cifras), `eval.test.ts` (evaluación manual). Con pruebas; sin conectar a la app.
+
+Cambios al diseño:
+- **El modelo ya no devuelve entidad ni evidencia.** Solo elige hallazgos por su huella y escribe título, razonamiento, efecto esperado y advertencias. La entidad y la evidencia las copia el código del primer hallazgo. Quita dos vías de error.
+- **Ningún análisis queda vacío:** si el modelo falla dos veces, se publican los hallazgos con texto de plantilla. Si no se detectó nada, ni se llama al modelo.
+- **Hallazgos graves no se pierden:** si el modelo omite uno de severidad alta, se añade con texto de plantilla.
+- **«esperar_datos»** se acepta siempre, salvo en hallazgos graves, y siempre con confianza baja.
+
+Prueba de 6 modelos del router (datos reales de Intertec con 4 hallazgos, y una cuenta sintética con 12). Una sola pasada, sin reintento, con el validador final:
+
+| Modelo | Reales | Sintético | Créditos del router por análisis | Observación |
+|---|---|---|---|---|
+| gpt-5.6-luna | rechazada* | válida | ≈ 0,4 | 13–15 s. *Una recomendación sin hallazgo citado; el reintento lo corrige |
+| gemini-3.7-flash | válida | válida | ≈ 1,8 | 18 s. Algo más genérico; subió una confianza de más (el validador la bajó) |
+| gpt-5.6-sol | válida | válida | 9–12 | 23–30 s |
+| gpt-5.5 | válida | rechazada | 12–13 | calculó una cifra propia (20.000) y el validador la rechazó |
+| claude-sonnet-5 | válida | falló el proveedor | ≈ 8 | 60 s; el router no aplica el esquema estricto a Claude |
+| claude-opus-5 | JSON inválido | rechazada | 18–22 | ignoró el esquema y se quedó sin tokens |
+
+Conclusión provisoria: **gpt-5.6-luna** como modelo por defecto (el mismo del agente de conversaciones, el más barato, con esquema estricto) y **gemini-3.7-flash** como alterno. Los modelos de Claude no sirven por el router para salida estructurada estricta y cuestan de 20 a 50 veces más. Falta la calificación a ciegas de las recomendaciones por parte de Alex antes de fijarlo.
+
+El validador detectó en la práctica: acciones que no correspondían al hallazgo, una cifra calculada por el modelo, una recomendación sin hallazgo y confianzas infladas. Todo se cubre con reintento o plantilla.
+

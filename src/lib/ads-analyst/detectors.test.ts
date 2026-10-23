@@ -1,57 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { detectFindings } from './detectors'
-import { analysisWindows, buildSnapshot } from './snapshot'
-import { catalogAd, days, TODAY } from './fixtures'
-import type { AttributionInput, CatalogAd, DailyRow } from './types'
-
-const w = analysisWindows(TODAY, 14)
-const START = '2026-09-01'
-
-interface AdSpec {
-  id: string
-  catalog?: Partial<CatalogAd>
-  /** Daily spend in the current / previous window. */
-  spend?: number
-  prevSpend?: number
-  chats?: number
-  leads?: number
-  prevChats?: number
-  prevLeads?: number
-  headline?: string
-  metaChats?: number
-}
-
-function snapshotOf(specs: AdSpec[]) {
-  const catalog: CatalogAd[] = []
-  const daily: DailyRow[] = []
-  const current: AttributionInput[] = []
-  const previous: AttributionInput[] = []
-  for (const s of specs) {
-    catalog.push(catalogAd(s.id, s.catalog))
-    // Old enough to be judged: spending since September.
-    daily.push(...days(s.id, START, w.previous.to, { spend: s.prevSpend ?? 10000, conversations_started: 0 }))
-    daily.push(
-      ...days(s.id, w.current.from, w.current.to, {
-        spend: s.spend ?? 10000,
-        conversations_started: (s.metaChats ?? s.chats ?? 0) / 14,
-      }),
-    )
-    const head = s.headline ?? `Titular ${s.id}`
-    if (s.chats !== undefined) current.push({ source_type: 'ad', source_id: s.id, headline: head, conversations: s.chats, leads: s.leads ?? 0 })
-    if (s.prevChats !== undefined) previous.push({ source_type: 'ad', source_id: s.id, headline: head, conversations: s.prevChats, leads: s.prevLeads ?? 0 })
-  }
-  return buildSnapshot({ today: TODAY, catalog, daily, attribution: { current, previous } })
-}
+import { BASE, snapshotOf, type AdSpec } from './fixtures'
 
 const codes = (specs: AdSpec[]) => detectFindings(snapshotOf(specs)).map((f) => `${f.code}:${f.entity.id}`)
-
-// Three ordinary ads set the account's references: 140.000 spent each, 28 chats,
-// 7 leads -> 5.000 per chat, 20.000 per lead, 25 % of chats become leads.
-const BASE: AdSpec[] = [
-  { id: 'n1', chats: 28, leads: 7 },
-  { id: 'n2', chats: 28, leads: 7 },
-  { id: 'n3', chats: 28, leads: 7 },
-]
 
 describe('detectFindings', () => {
   it('finds nothing wrong with ordinary ads', () => {

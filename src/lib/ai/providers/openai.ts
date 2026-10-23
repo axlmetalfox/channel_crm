@@ -78,6 +78,8 @@ export interface OpenAiJsonArgs extends ProviderArgs {
   schemaName: string
   /** JSON Schema the reply must satisfy (strict mode). */
   schema: object
+  /** Output cap; defaults to the short-reply limit. Analyses that write several paragraphs need more. */
+  maxOutputTokens?: number
 }
 
 /**
@@ -105,7 +107,7 @@ export async function generateOpenAiJson(
           { role: 'system', content: systemPrompt },
           ...mergeConsecutive(messages),
         ],
-        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        max_completion_tokens: args.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
         response_format: {
           type: 'json_schema',
           json_schema: { name: args.schemaName, strict: true, schema: args.schema },
